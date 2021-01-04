@@ -1,0 +1,102 @@
+---
+title: "Credit constraints and international trade"
+subtitle: "Does credit scarcity limit trade gains?"
+author: | 
+  | \textbf{George Mason University}
+  | \textbf{Schar School of Policy and Government}
+  | \textbf{Syllabus for:}
+  | Directed Readings and Research (POGO 796)
+  | Professor Maurice Kugler
+  | Daniel Grimaldi 
+  | Classes: Thursdays, 10:30 am to 12:30 pm, or by appointment 
+date: "Spring, 2021"
+
+header-includes:
+    - \usepackage{setspace}\doublespacing
+    - \usepackage{dcolumn}
+    - \usepackage{lscape}
+    - \newcommand{\blandscape}{\begin{landscape}}
+    - \newcommand{\elandscape}{\end{landscape}}
+    - \newcommand{\nclearpage}{\clearpage}
+    - \newcommand{\bcenter}{\begin{center}}
+    - \newcommand{\ecenter}{\end{center}}
+    - \newcommand{\nsmall}{\small}
+    
+output:
+  pdf_document:
+      number_sections: false
+      keep_tex: false
+  citation_package: natbib
+  latex_engine: pdflatex
+  df_print: kable
+fontsize: 11pt
+space: double
+geometry: margin=1in
+bibliography: references.bib
+---
+
+\bcenter
+
+# Course overview
+
+\ecenter
+
+The Chinese expansion into world trade, especially after the 2000s, has been vastly studied. Previous results suggest localities affected by the Chinese competition tend to observe productivity gains associated with net industrial short-run job losses. The magnitude of both effects, whoever, vary considerably. Using data from the Brazilian economy, this course will delve deeper into one question: are credit constraints relevant to explain the magnitude of trade shock's impacts in the developing world?
+
+Financial constraints at the local level could easily interact with trade shocks to amplify employment's adverse outcomes while limiting the expected gains in competitiveness growth. If that is the case, credit constraints might have a relevant role in limiting the benefits from trade integration and globalization in the developing world -- exactly where credit constraints tend to be more pervasive.
+
+# Part I: literature review on trade shocks
+
+The theoretical reasons linking trade to economic growth are as old as economics itself. From a macro perspective, engaging in intensified international trade flows should lead to specialization gains, with capital and labor being driven towards more productive sectors. It should also increase technological diffusion speed, which would further elicit more innovation.
+
+At the micro-level, the access to better (or cheaper) inputs, as well as the stimulus created by foreign competition, should force local producers to increase investment and improve their efficiency. Due to this process, the most competitive firms would be able to boost their performance and engage in export activities, while the less competitive ones would be forced to shut their operations.
+
+The recent literature on trade shocks seems to corroborate most of these theoretical predictions. Having as a goal to build a clear perspective about the main results obtained by previous works, this part of the course we will review the most influential empirical papers in this literature branch, much of it highlighted in the literature review by @gutiérrez2017.[^1]
+
+[^1]: Other key articles are @bloom2016; @iacovone2013; @autor2013; @acemoglu2015; @molina2017; @mendez2015; @mesquita2020; @dix-carneiro2017; @dix-carneiro2019; @caliendo2019; @kugler2020; @eslava2013.
+
+**Duration:** From January 25 until February 11
+
+**Assignments:** A detailed abstract that must be submitted for the 19th Annual GEP/CEPR Postgraduate Conference[^2]
+
+[^2]: <https://www.nottingham.ac.uk/gep/documents/conferences/2020-21/pg-conf-cfp-2021.pdf>
+
+# Part II: empirical framework
+
+Both the positive impacts on productivity and the adverse effects on labor demand are expected outcomes of a trade shock. However, the net welfare effects and the time required to reach the new equilibrium might be substantially affected by market failures. In particular, a context of widespread credit constraints can affect local firm's capacity to invest and, through this channel, amplify the adverse outcomes in employment while limiting the expected gains in competitiveness growth. Financially constrained firms tend to have lower levels of investments, and at least part of the gains from trade might depend on local firms' capacity to invest as a response to external competitiveness shocks. Without it, even productive firms could perish when facing competition from imports.
+
+For this part of the course, the goal is to develop an empirical framework that combines the Chinese trade expansion (as a competitiveness external shock) with mergers and acquisitions in the Brazilian banking sector (as credit shock) for assessing if financial constraints might have a relevant role in limiting resource-reallocation productivity gains from trade integration and globalization in the developing world.
+
+Brazil is the ideal case for this investigation for two reasons. First, there is evidence that credit constraints are a relevant bottleneck for firms' growth in the Brazilian economy [@ambrozio2017; @cavalcanti2017]. Second, Brazil has witnessed a dramatic expansion of Chinese imports during the last 20 years, representing a relevant competitiveness trade shock [@mesquita2020]. Those two factors make it more likely to observe this hypothesized interaction between credit constraints and trade shocks.
+
+## Data Sets
+
+Three different data sources will be used to implement the empirical framework: i) municipality-sector employment levels will come from the Annual Registry for Social Information (RAIS); ii) trade flows will be extracted from the United Nations International Trade Statitics (UNComtrade); and iii) information on banks' branches at the municipality level will be obtained through Municipality Banking Statistics (ESTBAN).
+
+RAIS is available for the 1985-2018 period, but it uses a specific Brazilian industry classification (CNAE). Thus, building a converter connecting CNAE with the Standard International Trade Classification (SITC) for the entire period will be necessary .
+
+## Trade shocks and shift-share design
+
+Since economic activities are not equally distributed in the territory, it is possible to use this heterogeneity to implement a causal estimation for the trade shock's local-level impacts using a shift-share design (also known as Bartik Instruments). This method has been extensively used, but it is crucial to incorporate recent developments associated with this method [@adão2019].
+
+## Financial consolidation as credit shocks
+
+With mixed results, mergers and acquisitions (M&As) have been a classical source of exogenous credit shock in the banking literature [@focarelli2003; @erel2011; @petersen1995]. For the Brazilian economy, @joaquim2019 have found negative impacts on credit access due to market concentration. The challenge to be tackled here is the development of a specific framework that allows combining M&As with the previously mentioned Bartik Instrument.
+
+**Duration:** From February 18 until March 25
+
+**Assignments:** i) a cleaned data set consolidating information from RAIS, UNComtrade and ESTBAN; and ii) a formalization of the econometric design to be used in the empirical investigation.
+
+# Part III: implementing the empirical exercise
+
+The last section of the course will be dedicated to the implementation of the empirical exercise developed in Part II. This exercise must be consolidated into an improved version of [@grimaldi2020]. This revised version must necessarily incorporate a longer period of analysis and a continuous variable for the credit shock.
+
+Expanding the period of analysis has two main advantages. The first is to allow us to apply a stacked first-difference estimator. In this new setting, it would be possible to control for possible covariates that are not changing within each period of time. The second advantage would be the possibility to evaluate the impacts of the Chinese competition since its ascension to the World Trade Organization in 2001.
+
+@grimaldi2020 used a dummy variable to identify the municipalities affected by the credit shock. However, the combination of a continuous variable for the trade shock with a dummy might explain the lack of consistency observed for the interaction term in this previous work work due to coarseness in the measure of credit constraints. A new design with a continuous variable for the credit shock might lead to more precise and robust results.
+
+**Duration:** From April 1 until May 13
+
+**Assignments:** a revised version of @grimaldi2020, that should be presented in the 19th Annual GEP/CEPR Postgraduate Conference, assuming acceptance.
+
+# Required readings for the course
