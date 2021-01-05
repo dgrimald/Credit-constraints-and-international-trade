@@ -1,6 +1,6 @@
 ---
 title: "Credit constraints and international trade"
-subtitle: "Does credit scarcity limit trade gains?"
+subtitle: "Does credit scarcity end trade gains?"
 author: | 
   | \textbf{George Mason University}
   | \textbf{Schar School of Policy and Government}
@@ -98,5 +98,9 @@ Expanding the period of analysis has two main advantages. The first is to allow 
 **Duration:** From April 1 until May 13
 
 **Assignments:** a revised version of @grimaldi2020, that should be presented in the 19th Annual GEP/CEPR Postgraduate Conference, assuming acceptance.
+
+# Grading
+
+**For the overall grade, the abstract counts for 15%, the cleaned data set 25%, the presentation of the revised econometric design 25%, and the revised paper for 35%**. Late assignments will not be accepted without prior written approval from the instructor. Emergency, unforeseen, and/or serious extenuating circumstances will be handled on a case-by-case basis.
 
 # Required readings for the course
