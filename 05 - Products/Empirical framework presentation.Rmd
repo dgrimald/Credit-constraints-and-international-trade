@@ -1,0 +1,107 @@
+---
+title: "Heterogenous impacts of import competition in Brazil"
+subtitle: "Does credity scarcity limit trade gains?"
+date: "October 13, 2020"
+institute: "Revisiting the empirical framework"
+header-includes:
+  - \widowpenalties 1 190
+  - \usepackage{dcolumn}
+  - \newcommand{\nsmall}{\small}
+  - \setbeamertemplate{frametitle continuation}{}
+
+output:
+  beamer_presentation:
+    theme: "DagriSchar"
+    fonttheme: "structurebold"
+    latex_engine: xelatex
+    incremental: false
+bibliography: "../04 - References/basic_references.bib"
+suppress-bibliography: true
+---
+
+```{r setup, include=FALSE}
+if(!require(tidyverse)){install.packages("tidyverse")}
+```
+
+## Context
+
+-   China is accepted into WTO in December-2001
+
+-   Itau-Unibanco merger happens is announced in October-2008, and approved by Central Bank in February-2009.
+
+-   How to use these two dominant movements to study the interaction between external competition and credit availability?
+
+## Main data sets
+
+-   RAIS (public access): 1985 to 2018
+
+    -   Before 1993, reported economic sectors are not compatible with CNAE or other international classifications.
+
+-   ESTBAN (public access): 1988 to 2020
+
+## Previous strategy 
+
+\begin{footnotesize}
+\begin{align}
+\Delta L_{m,t} &= \upsilon + \beta_1 \; \Delta C_{m,t} + \beta_2 \; \Delta Exp_{m,t} + \beta_3 \; \Delta C_{m,t} \Delta Exp_{m,t} \\ &\quad + \epsilon_{m,t} \nonumber \\
+\Delta C_{m,t} &= \begin{cases}
+1 \iff m \in Treated \; municipalities \\
+0 \iff m\in Untreated \; municipalities
+\end{cases} \\
+\Delta Exp_{m,t} &= \sum_{s \in S}{\frac{L_{m,s,t}}{L_{s,t}} \; \frac{\Delta M^{Br-China}_{s,t}}{L_{m,t}}}
+\end{align}
+\end{footnotesize}
+
+Where $t=[2009;2017]$, $Tretated$ represented municipalities affected by Itau-Unibanco merger, and $\Delta L = \frac{L_{m,t} - L_{m,t_0}}{L_{m,t_0}}$ -- as in @grimaldi_heterogenous_2020
+
+## Revisited Strategy
+
+\begin{footnotesize}
+\begin{align}
+\Delta L_{m,t} &= \upsilon + \beta_1 \; \Delta C_{m,t} + \beta_2 \; \Delta Exp_{m,t} + \beta_3 \; \Delta C_{m,t} \Delta Exp_{m,t} \\ &+ \epsilon_{m,t} \nonumber \\
+\Delta C_{m,t} &= \frac{\Delta Loans_{m,t}}{L_{m,t_0}} \\
+\Delta Exp_{m,t} &= \sum_{s \in S}{\frac{L_{m,s,t_0}}{L_{s,t_0}} \; \frac{\Delta M^{Br-China}_{s,t}}{L_{m,t_0}}}
+\end{align}
+\end{footnotesize}
+
+Where $t=[2001;2016]$, $\Delta L = \frac{L_{m,t} - L_{m,t_0}}{L_{m,t_0}}$, and $Loans$ represents private credit volume.
+
+## Import Endogeneity
+
+As in @grimaldi_heterogenous_2020 $\Delta Exp_{m,t}$ will be instrumented by: 
+
+\begin{footnotesize}
+\begin{align}
+\Delta Exp^{Mercosul^{c}}_{m,t} = \frac{\Delta M^{Mercosul^{c}-China_{s,t}}}{L_{m,t_{1995}}}
+\end{align}
+\end{footnotesize}
+
+## Credit Endogeneity
+
+The Itau-Unibanco merger can be used as instrument for $\Delta C_{m,t}$.
+
+  - We expect that the credit expansion will be negatively affected by the merger (as in @joaquim_bank_2019);
+
+  - additionally, we expect this negative impact to be as severe as the market concentration directly induced by the merger.
+  
+## Credit Endogeneity
+  
+Therefore, the following variables could be used as instruments: 
+
+\begin{footnotesize}
+\begin{align}
+Loans^{merger}_m &= \frac{\sum_{b \in Itau-Unibanco}{Loans_{b,m,2007}}}{Loans_{m, 2007}} \\
+Branches^{merger}_m &= \frac{\sum_{b \in Itau-Unibanco}{Branches_{b,m,2007}}}{Branches_{m, 2007}} \\
+\Delta HHI^{merger}_{m} &= \frac{\hat{HHI^{merger}}_{m, 2007} - HHI_{2007, m}}{HHI_{2007, m}}
+\end{align}
+\end{footnotesize}
+
+Where $b$ is a bank index; $Branches$ counts the number of branches associated with each bank; and $HHI$ is a measure of normalized Herfindahl-Hirschman index. The three variables would be equal to 0 for municipalities unaffected by the merger.
+
+## Future challenge
+
+How to insert more control variables in this first-difference setting?
+
+  - Build a stacked first difference would force us to find another instrument for credit volume (one that is valid prior to the merger);
+  - Can I add variables that are fixed in time in this first-difference setting? Would that mean controlling for differential trends [@acemoglu_import_2015]? 
+
