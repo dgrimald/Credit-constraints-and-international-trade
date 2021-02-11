@@ -15,7 +15,7 @@ output:
     fonttheme: "structurebold"
     latex_engine: xelatex
     incremental: false
-bibliography: "../04 - References/basic_references.bib"
+bibliography: "../../04 - References/basic_references.bib"
 suppress-bibliography: true
 ---
 

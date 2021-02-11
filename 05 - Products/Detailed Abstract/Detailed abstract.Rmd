@@ -1,0 +1,196 @@
+---
+title: "Does credity scarcity limit trade gains?"
+subtitle: "The heterogeneous impacts of the Chinese imports in Brazil"
+author: | 
+  | Daniel Grimaldi - dgrimald@gmu.edu^[PhD student at the Schar School of Public Policy in the George Mason University.]
+  | Detailed abstract for the 19th GEP/CEPR Annual Postgraduate Conference.
+date: "Spring - 2021"
+
+header-includes:
+    - \usepackage{dcolumn}
+    - \usepackage{lscape}
+    - \usepackage{multicol}
+    - \usepackage{rotating}
+    - \usepackage{amsmath}
+    - \newcommand{\blandscape}{\begin{landscape}}
+    - \newcommand{\elandscape}{\end{landscape}}
+    - \newcommand{\nclearpage}{\clearpage}
+    - \newcommand{\bcenter}{\begin{center}}
+    - \newcommand{\ecenter}{\end{center}}
+    - \newcommand{\nsmall}{\small}
+    
+output:
+  pdf_document:
+      number_sections: true
+      keep_tex: false
+  citation_package: natbib
+  latex_engine: pdflatex
+  df_print: kable
+fontsize: 11pt
+space: double
+geometry: margin=1in
+bibliography: "../../04 - References/basic_references.bib"
+
+abstract: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 100, digits = 4)
+```
+
+```{r echo=FALSE, include=FALSE}
+# loading required packages
+library(knitr)
+if(!require(kableExtra)){install.packages("kableExtra")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(magrittr)){install.packages("magrittr")}
+if(!require(DBI)){install.packages("DBI")}
+if(!require(odbc)){install.packages("odbc")}
+if(!require(RSQLite)){install.packages("RSQLite")}
+```
+
+\begin{center}
+\textbf{JEL Classification: G21; H81; F16}
+
+\vspace{-0.3cm}
+\textbf{Keywords: Credit constraints, employment, international trade}
+\end{center}
+
+# Motivation
+
+The theoretical reasons linking trade to economic growth are as old as economics itself. From a macro perspective, engaging in international production flows should lead to specialization gains, with capital and labor being driven towards more productive sectors [@findlay_chapter_1984]. It should also increase technological diffusion, which would further produce more innovation [@grossman_innovation_1991]. At the micro-level, the access to better inputs, as well as the stimulus created by foreign competition, should force local producers to improve their efficiency [@perla_equilibrium_2021]. During this process, the most competitive firms would be able to boost their performance and expand, while the less competitive ones would be forced to shut down their operations[^1] [@melitz_impact_2003; and  @traca_imports_2002].
+
+[^1]: From a static-equilibrium perspective, the expected net gains of this creative destruction process on social welfare are positive. However, Within a dynamic-equilibrium setting, the existence of externalities associated with certain activities introduces the possibility of immiserizing-growth. For more on this discussion, see @darity2005.
+
+A branch of empirical literature has been exploring the recent Chinese expansion into global markets to investigate several of these theoretical predictions. Trade flows from China are growing at a fast pace since the 1990s, and they accelerated even further after its ascension to World Trade Organization in 2001 [@qureshi_trade_2008]. From an internal perspective, this movement reflects productivity gains within the Chinese economy. For the rest of the global, this expansion is a relevant trade shock, with important implications for both developed and developing nations.   
+
+The most common observed result is that regions or industries more exposed to Chinese competition tend to endure net job losses [@autor2013; @iacovone2013; @acemoglu2015; @mendez2015; @bloom2016; @pierce2016; @molina2017; @gutierrez_declining_2017; @hombert_can_2018; @brummund_labor_2019; and @mesquita2020]. This movement is concentrated on low-skilled occupations at the manufacture sector [@bloom2016; @hombert_can_2018; and @mesquita2020], and it is mostly driven by smaller firms that shrink or exit the market [@iacovone2013; @gutierrez_declining_2017]. Results also suggest negative impacts on wages [@autor2013; @molina2017], and, at least in developing countries, an increase in internal migration outwards from the most affected regions [@mendez2015; @brummund_labor_2019].
+
+This set of results observed for labor markets across different countries is consistent with a context of creative destruction triggered by trade competition. The expected positive side of such a process should be an increase in economic efficiency. For developed countries this seems to be the case. There is evidence the more competitive local firms were able to increase investments and expand activities in response to external pressures [@gutierrez_declining_2017]. Additionally, results support that leading firms, especially those in R&D intensive sectors, boosted innovation [@bloom2016] and product differentiation [@hombert_can_2018] to fight import competition. 
+
+Among developing nations, results in terms of efficiency gains are mixed. Studying Mexico, @iacovone2013 found evidence that Chinese competitiveness pressure lead to overall efficiency gains by transferring capital and labor towards larger and more productive plants. For the Brazilian economy, @mesquita2020 found no impacts on innovation outcomes (measured by number of new patents, products or processes). Despite that, @mesquita2020 found positive effects on surviving firms' total factor productivity (TFP), but the magnitude was roughly a third of what @bloom2016 observed for a set of 12 European countries. The Colombian case is even worse, with results from @molina2017 suggesting an overall negative impact on TFP. 
+
+The way trade shocks resonate inside an economy will surely depend on intra-firm characteristics, which can vary drastically. Nonetheless, extra-firm determinants are also likely to play a relevant role. For instance, @dix-carneiro_trade_2017 have found that impaired regional mobility in the labor force and capital rigidity tends to amplify job losses in the afterwards of trade liberalizations.
+
+The existence of pervasive credit constraints can also be a decisive element to shape the impacts of a trade shock. Financially constrained firms have lower level of investments [@choi2018], profits and final output [@banerjee2014]. Also, they tend to engage less in international trade, exporting smaller amounts [@zia2008], from fewer products and to fewer destinations [@manova2013]. The capacity to invest is a key transmission mechanism linking the import competition stimulus to local productivity gains. Jeopardizing this capacity will limit the migration of production factors towards more productive activities -- within or between firms. Even businesses with potential to take advantage of improved access to global chains will struggle to gain efficiency, increase production, and engage in international trade.
+
+All these pervasive effects from credit constraints could easily interact with trade shocks to amplify the adverse outcomes, while limiting the expected gains in terms of economic efficiency. If that is the case, financial constraints might be a cap to expand trade integration in the developing world -- exactly where credit constraints tend to be more pervasive. So far, however, this hypothesis has not yet been tested, and this research intends to amend that.
+
+Brazil is the ideal case for this investigation for two reasons. First, there is evidence that credit constraints are a relevant bottleneck for firms' growth in the Brazilian economy [@ambrozio2017; @cavalcanti2017]. Second, Brazil has witnessed a dramatic expansion of imports from China during the last 20 years, which represents a relevant trade shock [@mesquita2020]. This scenario makes it more likely for us to observe the hypothesized interaction between credit constraints and trade shocks.
+
+# Data and empirical framework
+
+## Emprirical framework
+
+The first part of the empirical approach will follow suit the previous literature on import exposure and local economic growth. As in @autor2013 seminal work, we will use change in imports from China as a measure for relative competitiveness gains. Since these changes are heterogeneous across sectors and economic activities are not equally distributed in the territory, local labor market dynamics should depend on how much they are exposed to competitiveness pressures.
+
+Following a classical Shift-Share Design [@adao_shift-share_2019], Equation \ref{eq:lip} operationalizes such heterogeneity. The last year before China ascension to WTO (2000) is used as benchmark. The share is defined by the weight of local $m$ in the stock of workers ($L$) hired by sector $s$ in Brazil. The shift is given by sectorial changes to Brazilian imports from China ($M^{China}$) between year $t$ and the benchmark. Intuitively, the local import pressure ($LIP$) will be higher where economic activity in 2000 was more dependent on products China is increasingly exporting to Brazil.
+
+\begin{align}
+LIP_{m,t} = \sum_{s \in S}{\frac{L_{m,s,2000}}{L_{s,2000}} \; (M^{China}_{s,t} - M^{China}_{s,2000})} \label{eq:lip}
+\end{align}
+
+However, for any given period the observed import volume represents the equilibrium between supply and demand-side factors. The first is driven by the expansion of Chinese relative competitiveness in the Brazilian market, but the former is influenced by elements that can increase both local labor market outcomes and imports. To mitigate this problem and avoid a biased OLS estimation, $M^{China}$ will be instrumented by $\hat{M}^{China}$, that represents sectorial imports from China to a set of comparable countries^[The main idea is to use the other Mercosur countries (Argentina, Paraguay, and Uruguay). This change should be enough to wipe out local demand elements that could bias the estimation. Still, it would not alter dramatically costs associated with transportation or tariffs, which could affect the relative competitiveness gains.].
+
+The second part of our empirical approach is inspired by a branch of literature that explores the impacts of mergers and acquisitions in the banking sector [@berger_effects_1998; @focarelli_are_2003; @berger_bank_2004; @carow_how_2006; @joaquim2019]. In particular, we will use the mega merger between Itaú and Unibanco, that took place in February of 2009 in Brazil. Table 1 summarizes the relative importance of both institutions. At the time, they were among the largest Brazilian banks - considering credit volume, they ranked 3rd and 7th, respectively. Such operation created the largest bank in the southern hemisphere, with total assets superior to US$ 260 billion.
+
+@joaquim2019 have already studied this merger. Their results suggest it produced an increase in spreads, a reduction in credit levels, and a slow employment growth in municipalities with branches from both banks at the moment of the merger. It is relevant to note that this merger was decided at the national level, and it is unlikely that any municipality, in particular, have had been determinant. Thus, it is reasonable to understand this concentration movement as an negative exogenous credit shock at the local level. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, cache=TRUE}
+# Connects to datalake
+lake <- dbConnect(SQLite(), "../../../../01 - datalake/datalake.db")
+
+qEstBan <- "SELECT municipio, nome, SUM(`total.credito`) AS `total.credit`, SUM(`n.agencias`)/12 AS `n.agencias`, SUM(`depositos.vista`) AS `depositos.vista`, SUM(`depositos.poupanca`) AS `depositos.poupanca`, SUM(`depositos.interfinanceiros`) AS `depositos.interfinanceiros`
+FROM EstBan
+WHERE year==2008
+GROUP BY municipio, nome"
+
+data.estban <- dbGetQuery(lake, qEstBan)
+
+# closing connection with datalake
+dbDisconnect(lake)
+
+# lista buyer
+lista.buyer <- c("BANCO ITAÚ CONSIGNADO S.A.", "BCO ITAÚ-BBA S.A.", "BCO ITAÚ BBA S.A.", "BCO ITAUBANK S.A.", "ITAÚ UNIBANCO S.A.", "ITAÚ UNIBANCO HOLDING S.A.")
+lista.acquired <- c("BANCO INVESTCRED UNIBANCO S.A.", "UNIBANCO-UNIAO BCOS BRAS S.A.")
+lista.merge <- c(lista.buyer, lista.acquired)
+
+data.ranking  <- data.estban %>% 
+  select(nome, total.credit) %>%
+  mutate(nome=case_when(nome %in% lista.buyer ~ "Itau",
+                        nome %in% lista.acquired ~ "Unibanco",
+                        TRUE ~ nome)) %>% 
+  group_by(nome) %>% 
+  summarise(total.credit = sum(total.credit)/1000000000) %>% 
+  arrange(desc(total.credit))
+
+
+suffix <- function(x){
+  if(x==1){
+    y="st"
+  }else if(x==2){
+    y="nd"
+  }else{y="th"}
+  y}
+
+pos.itau <- grep("Itau", data.ranking$nome)
+pos.itau <- paste0(pos.itau, suffix(pos.itau))
+pos.unibanco <- grep("Unibanco", data.ranking$nome)
+
+table1  <- data.estban %>% 
+  filter(!is.na(municipio)) %>% 
+  mutate(total.deposits = depositos.vista + depositos.poupanca + depositos.interfinanceiros) %>% 
+  select(municipio, nome, total.credit, total.deposits, n.agencias) %>%
+  mutate(nome=case_when(nome %in% lista.buyer ~ "Itau",
+                        nome %in% lista.acquired ~ "Unibanco",
+                        TRUE ~ "All others combined")) %>% 
+  group_by(nome) %>% 
+  summarise(n.agencias = sum(n.agencias),
+            n.municpalities = n_distinct(municipio),
+            total.deposits = sum(total.deposits)/1000000000,
+            total.credit = sum(total.credit)/1000000000) %>% 
+  arrange(desc(total.credit))
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis', dependson=-1}
+kbl(table1, caption="Itau and Unibanco relevance in the Brazilian banking system (2008)", booktabs = TRUE,
+      col.names=c("", "Number of branches", "Municipalities attended", "Deposits", "Credit")) %>%
+  kable_styling(latex_options = "HOLD_position") %>%
+  add_header_above(c(" " = 3, "BRL Billions (year total)" = 2)) %>% 
+  footnote(general = "ESTBAN (Brazilian Central Bank).", general_title = "Source:", footnote_as_chunk = T)
+```
+
+Also, we expect this shock to be as severe as the amount of market concentration it induced. Equation \ref{eq:lim} implements our measure for the local impact of the merger ($LIM$). Consider that $s$ represents the 2008 market share, in terms of new credit loans, for bank $i$ in locality $m$, and $I_{pre}$ and $I_{post}$ are the sets of independent banks before and after the merge. Note that in the last set Itaú and Unibanco are counted as one single institution. Intuitively, $LIM$ can be interpreted as the expected change in the Herfindahl–Hirschman Index of locality $m$ due to the merger. It is important to observe that $LIM$ will be equal to zero for all localities that were not attended by both Itaú and Unibanco by the time of their merge. This reflects the fact that they are not considered places affected (treated) by the merger.        
+
+\begin{align}
+LIM_{m} = \sum_{i \in I_{post}}{s^2_{i, m}} - \sum_{i \in I_{pre}}{s^2_{i, m}}
+\label{eq:lim}
+\end{align}
+
+Equation \ref{eq:outcome} combines $LIP$ and $LIM$ into the proposed identification strategy, that will be estimated separately for each $t \in [2001, 2018]$ through an IV-2SLS - where, as previously mentioned, $\hat{M}^{China}$ serve as instrument for  $M^{China}$. Beyond the independent variables of interest and their interaction, Equation \ref{eq:outcome} also controls for past trends in the outcome variable $(L_{m, 1999} - L_{m, 1994})$. Also, note that $LIM$ is calculated considering 2008 (the last year prior to the merger) market shares and, thus, it does not change for different $t$.          
+
+\begin{align}
+L_{m,t} - L_{m,2000} = \beta_t LIP_{m,t} + \delta_t LIM_{m} + \phi_t LIP_{m,t} LIM_{m} + \gamma_t(L_{m, 1999} - L_{m, 1994}) + \epsilon_{m,t}
+\label{eq:outcome}
+\end{align}
+
+## Data
+
+Three different sources will be used to implement Equation \ref{eq:outcome}: i) locality-sector employment levels will come from the Annual Registry for Social Information (RAIS); ii) trade flows will be extracted from the United Nations International Trade Statitics (UNComtrade); and iii) information on banks' branches at the municipality level were obtained through Municipality Banking Statistics (ESTBAN).
+
+RAIS is a rich employer-employee data set administered by the Brazilian Ministry of Economy and has been intensively used for social science research (see, for instance, [@ulyssea2018; @dix-carneiro_trade_2017]. Compliance with RAIS is mandatory, so it can be understood as a census of Brazil's formal businesses. This research extracted from RAIS information on firms' total number of workers (yearly average) and the main economic sector of activity. RAIS's activity sectors follow 5-digit level CNAE, a classification developed and administered by the Brazilian Institute of Geography and Statistics (IBGE). 
+
+UNComtrade provides product-level data for worldwide trade flows. Information on imports from China will be extracted at the 6-digits level of the Harmonized System classification. For computing $LIP$, product-level data will need to be converted to CNAE codes.^[We will seek to replicate a crosswalk procedure originally implemented by @mesquita2020.]
+
+Finally, ESTBAN is a data set administered by the Brazilian Central Bank with detailed banking activity information. In particular, it reveals the existence of banking branches for each of Brazilian municipalities as well as their level of credit concession. Thus, it will be used to calculate $LIM$ for each locality.
+
+# Expected results
+
+Following the previous literature that explored the Chinese expansion into global markets, we expect to find $\beta_t$ to be negative and statistically significant, reflecting the adverse effects of LIP in local employment performance -- especially when considering tradeable sectors. We also expect to observe monotonically higher values for $beta_t$ as $t$ moves farther from 2001.    
+
+We also expect to replicate results previously found by @joaquim2019. Thus, $\delta_t$ should also be negative and statistically significant, but only for years after 2008. In the years before the merge, $\delta_t$ should not be statistically significant, reflecting the fact that municipalities affected and not affected by the merge were conditionally comparable. Additionally, we want to investigate whether the adverse impact caused by the credit shock is permanent or temporary. In the long run, we expect that competitors should be able to challenge the Itaú-Unibanco market power. This would reflect into a vanishing $\delta_t$, that eventually becomes non significant as $t$ moves farther from 2008.
+
+Finally, $\phi_t$ is our main coefficient of interest. We expect to find it to be negative and statistically significant only for the years after 2008. This results would validate the hypothesis that credit constraints limit the potential gains and/or amplify the adverse effects expected from trade integration. The long-run effect observed for this interaction should follow closely the behavior of $\delta_t$. Thus, we expect to observe a fading $\phi_t$ for years further in the future.    
+
+# References
