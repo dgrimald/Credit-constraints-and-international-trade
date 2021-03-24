@@ -1,0 +1,107 @@
+---
+title: "Creating the crosswalk file for Brazilian regions (Municipality-Region-MCA)"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: united
+    number_sections: false
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(knitr)
+if(!require(kableExtra)){install.packages("kableExtra")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(magrittr)){install.packages("magrittr")}
+if(!require(readxl)){install.packages("readxl")}
+if(!require(data.table)){install.packages("data.table")}
+```
+
+Information on Brazilian Geographic Regions can be found at [IBGE's website](https://www.ibge.gov.br/geociencias/organizacao-do-territorio/divisao-regional/15778-divisoes-regionais-do-brasil.html?=&t=o-que-e). This file will download and consolidate a basic dictionary that allows conversions from muncipalities to other aggregate measures of Brazilian regions.
+
+Also, the number of Brazilian municipalities have been changing over time. To allow a stable comparison for the period between 1994 to 2018, we will incorporate the logic of [Minimum Comparable Areas (MCAs)](https://basedosdados.org/dataset/br-ibge-amc), following the work of [Earl (2017)](https://www.scielo.br/scielo.php?script=sci_arttext&pid=S0101-41612017000100215).
+
+```{r, warning=FALSE, message=FALSE}
+# Data on Brazilian Regions (from IBGE)
+
+## downloading rawdata
+temp <- tempfile(fileext = ".xlsx")
+download.file("https://geoftp.ibge.gov.br/organizacao_do_territorio/divisao_regional/divisao_regional_do_brasil/divisao_regional_do_brasil_em_regioes_geograficas_2017/tabelas/regioes_geograficas_composicao_por_municipios_2017_20180911.xlsx", destfile=temp, method="wininet", mode="wb")
+
+## loading info
+regions.data <- read_xlsx(path=temp)
+
+## deleting temporary file
+unlink(temp)
+
+# Data on MACs from Base dos Dados:
+
+## downloading raw data
+temp <- tempfile(fileext = ".zip")
+download.file("https://storage.googleapis.com/basedosdados-public/one-click-download/br_ibge_amc/municipio_de_para.zip
+", destfile=temp, method="wininet", mode="wb")
+unzip(temp)
+
+## loading info
+mac.data <- read_csv("municipio_de_para.csv")
+
+## deleting temporary files
+unlink(temp)
+unlink("municipio_de_para.csv")
+
+# Filtering mac.data to allow MACs between 1991 and 2010
+mac.data %<>%
+  filter(ano_de == 1991, 
+         ano_para == 2010) %>% 
+  mutate(id_municipio = as.character(id_municipio))
+
+# joining with definition of Brazilian regions
+mun_region.crosswalk <- regions.data %>% 
+  left_join(mac.data, by=c("CD_GEOCODI"="id_municipio")) %>% 
+  rename(nome.mun = nome_mun,
+         nome.microregion = nome_rgi,
+         nome.macroregion = nome_rgint, 
+         id.mun = CD_GEOCODI,
+         id.microregion = cod_rgi,
+         id.macroregion = cod_rgint,
+         id.mca = id_AMC
+        ) %>% 
+  select(id.mun, id.microregion, id.macroregion, id.mca, nome.mun, nome.microregion, nome.macroregion)
+```
+
+[Earl (2017)](https://www.scielo.br/scielo.php?script=sci_arttext&pid=S0101-41612017000100215) establishes MCAs between 1991 and 2010. Still, as Table 1 shows, 5 new municipalities were created after 2010. These 5 new municipalities are going to be manually attributed to the MCA that encompass the original municipality from which the new municipalities splitted. The information used to guide this manual imputation is consolidated in Table 2.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='asis'}
+table1 <- as.data.frame(mun_region.crosswalk[is.na(mun_region.crosswalk$id.mca),])
+kbl(table1,
+    align=c("l", "l", "l"),
+    caption="Table 1: Municipalities created after 2010", booktabs = TRUE) %>%
+  kable_styling() %>% 
+  footnote(general = "IBGE", general_title = "Source:", footnote_as_chunk = T)
+```
+
+| Municipality name | Emancipation year | Splitted from   | Associated MCA | Source                                                              |
+|-------------------|-------------------|-----------------|----------------|---------------------------------------------------------------------|
+| Mojuí dos Campos  | 2013              | Santarém        | 2020           | [Wiki](<https://pt.wikipedia.org/wiki/Moju%C3%AD_dos_Campos>)       |
+| Balneário Rincão  | 2013              | Içara           | 14413          | [Wiki](<https://pt.wikipedia.org/wiki/Balne%C3%A1rio_Rinc%C3%A3o>)  |
+| Pescaria Brava    | 2013              | Laguna          | 14440          | [Wiki](<https://pt.wikipedia.org/wiki/Pescaria_Brava>)              |
+| Pinto Bandeira    | 2013              | Bento Gonçalves | 15038          | [Wiki](<https://pt.wikipedia.org/wiki/Pinto_Bandeira>)              |
+| Paraíso das Águas | 2013              | Costa Rica      | 1103           | [Wiki](<https://pt.wikipedia.org/wiki/Para%C3%ADso_das_%C3%81guas>) |
+
+: Guide for manual imputation of municipalities created after 2010
+
+```{r, warning=FALSE, message=FALSE}
+mun_region.crosswalk %<>%
+  mutate(id.mca = case_when(nome.mun=="Mojuí dos Campos" ~ 2020,
+                            nome.mun=="Balneário Rincão" ~ 14413,
+                            nome.mun=="Pescaria Brava" ~ 14440,
+                            nome.mun=="Pinto Bandeira" ~ 15038,
+                            nome.mun=="Paraíso das Águas" ~ 1103,
+                            TRUE ~ id.mca))
+```
+
+With that manual imputation, all the `r length(unique(mun_region.crosswalk$id.mun))` municipalities are associated with `r length(unique(mun_region.crosswalk$id.mca))` MCAs, `r length(unique(mun_region.crosswalk$id.microregion))` microregions, and `r length(unique(mun_region.crosswalk$id.macroregion))` macroregions.
+
+```{r, warning=FALSE, message=FALSE}
+save(mun_region.crosswalk, file="../02 - Data sets/mun-region_crosswalk.Rdata")
+```

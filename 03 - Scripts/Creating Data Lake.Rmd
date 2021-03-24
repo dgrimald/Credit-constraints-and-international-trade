@@ -1,0 +1,123 @@
+---
+title: "Data Lake creation: final assignment for CDS-502"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: paper
+    number_sections: false
+bibliography: references.bib
+---
+
+```{r setup, echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(DBI)){install.packages("DBI")}
+if(!require(odbc)){install.packages("odbc")}
+if(!require(RSQLite)){install.packages("RSQLite")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(magrittr)){install.packages("magrittr")}
+if(!require(data.table)){install.packages("data.table")}
+```
+
+# Introduction
+
+This script creates a data lake designed specifically to support @grimaldi2021. Three main sources of information form this data set: i) locality-sector employment levels comes from the Annual Registry for Social Information ([RAIS](https://ces.ibge.gov.br/base-de-dados/metadados/mte/relacao-anual-de-informacoes-sociais-rais.html)); ii) trade flows are extracted from the United Nations International Trade Statitics (UNComtrade); and iii) information on banks' branches at the municipality level are obtained through Municipality Banking Statistics (ESTBAN). 
+
+RAIS is a rich employer-employee data set administered by the Brazilian Ministry of Economy and has been intensively used for social science research (see, for instance, @ulyssea2018 and @dix-carneiro2017). Compliance with RAIS is mandatory, so it can be understood as a census of Brazil's formal businesses. RAIS has two different versions. The confidential one is more detailed and allows the researcher to follow companies and employees across time, as well as to link employers with their employees. @grimaldi2021 will use the public version, where information about companies and employees can only be consolidated at the municipality-level.
+
+[UNComtrade](comtrade.un.org) provides product-level data for worldwide trade flows. Information on imports from China will be extracted at the 6-digits level of the Harmonized System classification. Linking this information with economic activity within Brazilian regions will require a crosswalk step to transform product-level into economic-sector trade flows.
+
+Finally, [ESTBAN](https://www4.bcb.gov.br/fis/cosif/estban.asp?frame=1) is a data set administered by the Brazilian Central Bank with detailed banking activity information. In particular, it reveals the existence of banking branches within Brazilian regions, as well as their level of credit concession. Consolidating data from ESTBAN allows the researcher to have a clear view of the local banking markets across different Brazilian regions.
+
+Figure 1 summarises the structure proposed for the data lake through an Entity-Relationship Diagram. It is possible to notice the existence of 6 entities. Municipalities define the smallest political-administrative units in Brazilian federation. This entity integrates all other entities, since all information will be consolidated into a region-level final data for the the econometrics approach defined in @grimaldi2021. Information from RAIS will feed other two entities: companies and employment relationship, while data from ESTBAN is integrate into an entity called bank branch. UNComtrade allows us to have international trade flows, that must be converted into economic sectors -- again following the empirical strategy in @grimaldi2021. The following section in this document will present the relational schema that arises from this E-R diagram, and it will delve deeper into the details associated with the creation of each table in this data lake.        
+
+<center>**Figure 1: Data lake E-R Diagram**</center>
+<a href="https://exchangelabsgmu-my.sharepoint.com/:i:/g/personal/dgrimald_masonlive_gmu_edu/EXWdYLxfenJLuOyX_9BzOOIBj50Uhrs7tvh-ZQMsgJzEYA?e=1hIkdU">
+<img title="E-R Diagram for the proposed data lake" src="../02 - Data sets/E-R Diagram - Public Version.png" alt="E-R Diagram"/>
+</a>
+
+# Creating the data lake
+
+```{r warning=FALSE, message=FALSE}
+# Creating initial connection
+data_lake <- dbConnect(RSQLite::SQLite(), dbname="../02 - Data sets/data_lake.db")
+```
+
+## Table for municipalities
+
+**DDL command for creating table municipalities**
+```{sql connection=data_lake}
+create table municipalities(
+'id.mun' varchar(7),
+'id.microregion' varchar(6),
+'id.macroregion' varchar(4),
+'id.mca' varchar(5),
+'name.mun' varchar (35),
+primary key ('id.mun')
+);
+```
+
+**Loading information into the data lake**
+
+```{r warning=FALSE, message=FALSE}
+load("../02 - Data sets/mun-region_crosswalk.Rdata")
+mun_region.crosswalk %<>%
+  mutate(id.mca = str_pad(id.mca, 5, "left", "0")) %>% 
+  select(id.mun, id.microregion, id.macroregion, id.mca, nome.mun) %>% 
+  rename(name.mun = nome.mun)
+dbWriteTable(data_lake, "municipalities", mun_region.crosswalk, append=TRUE)
+```
+
+## Table for companies
+
+
+
+## Table for employment relationships
+
+
+
+## Table for Economic Sectors
+
+```{sql connection=data_lake}
+create table economic_sectors(
+'cnae' varchar(5),
+'cnae.description' varchar(200),
+primary key ('cnae')
+);
+```
+
+```{r warning=FALSE, message=FALSE}
+load("../02 - Data sets/product-sector_crosswalk.Rdata")
+econ_sectors  <- product_sector.crosswalk %>%
+  select(cnae, cnae.description) 
+dbWriteTable(data_lake, "economic_sctors", econ_sectors, append=TRUE)
+```
+
+## Table for the Product-Sector Crosswalk
+
+```{sql connection=data_lake}
+create table economic_sectors(
+'cnae' varchar(5),
+'cnae.description' varchar(200),
+primary key ('cnae')
+);
+```
+
+```{r warning=FALSE, message=FALSE}
+load("../02 - Data sets/product-sector_crosswalk.Rdata")
+econ_sectors  <- product_sector.crosswalk %>%
+  select(cnae, cnae.description) 
+dbWriteTable(data_lake, "economic_sctors", econ_sectors, append=TRUE)
+```
+
+## Table for bank branches
+
+## Table for international trade flows
+
+
+# Closing connection with the Data Lake
+
+```{r warning=FALSE, message=FALSE}
+dbDisconnect(data_lake)
+```
+
+# References

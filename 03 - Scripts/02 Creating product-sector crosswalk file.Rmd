@@ -1,0 +1,228 @@
+---
+title: "Creating the crosswalk file (HS-1996 to CNAE-1995)"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: united
+    number_sections: false
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(knitr)
+if(!require(kableExtra)){install.packages("kableExtra")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(magrittr)){install.packages("magrittr")}
+if(!require(readxl)){install.packages("readxl")}
+if(!require(data.table)){install.packages("data.table")}
+```
+
+# Introduction
+
+This script will build a crosswalk file allowing a researcher to move from the International Harmonized System (HS-1996), at the 6-digits level, to the Brazilian Economic Activity Classification (CNAE-1995), at the 5-digits level. International trade flows are available at the HS-1996 classification in the UNComtrade Repository from 1997 onwards. Brazilian employment data is available at the CNAE-1995 classification from 1994 onwards. Thus, this crosswalk file will make it possible to join Brazilian trade and employment information for a large period of time.
+
+The crosswalk building process starts with the download of a conversion table elaborated by the Brazilian Institute of Geography and Statistics (IBGE). This conversion table links the Mercosur Common Nomenclature (NCM-1996) product classification at the 8-digits level with CNAE-1995 at the 5-digits level. Also, the first 6 digits of the NCM-96 are directly compatible with the HS-1996 classification. We used that fact to create the HS-1996 codes associated with each NCM-1996. After this initial treatment to the data set, we counted how many different CNAEs were associated with each NCM-96 code.
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+# download file
+temp1 <- tempfile(fileext = ".xls")
+download.file(url="https://concla.ibge.gov.br/images/concla/documentacao/NCM96XCNAE.xls",
+              destfile = temp1,
+              method="wininet",
+              mode="wb")
+
+# load data
+ibge.conversor <- read_excel(temp1, skip=11)
+
+# munge data
+names(ibge.conversor) <- c("ncm", "cnae", "ncm.description")
+ibge.conversor %<>%
+  mutate(ncm = str_pad(ncm, 8, "left", pad="0"),
+         hs = substr(ncm, 1, 6),
+         cnae = gsub("[:.:]", "", cnae)) %>% 
+  relocate(hs, .after=ncm)
+```
+
+# NCM-1996 to CNAE-1995: cases with missing associations
+
+```{r, warning=FALSE, message=FALSE, echo=TRUE, dependson=2}
+# manual imputation (previously prepared file)
+manual.imputs <- read.csv("../02 - Data sets/manual_imputation_ncm_cnaes.csv")
+names(manual.imputs) <- c("ncm", "cnae", "ncm.description")
+manual.imputs %<>%
+  mutate(ncm = str_pad(ncm, 8, "left", pad=0),
+         cnae = str_pad(cnae, 5, "left", pad=0))
+
+# downloading full CNAE description 
+temp2 <- tempfile(fileext = ".xls")
+download.file(url="https://cnae.ibge.gov.br/images/concla/downloads/CNAE.xls",
+              destfile = temp2,
+              method="wininet",
+              mode="wb")
+
+# munging data on CNAE description
+cnae.description <- read_excel(temp2, skip=7)
+cnae.description <- cnae.description[,c(4:5)]
+names(cnae.description) <- c("cnae", "cnae.description")
+cnae.description %<>%
+  mutate(cnae = gsub("[:.:]", "", cnae),
+         cnae = gsub("-", "", cnae)) %>% 
+  na.omit()
+
+# consolidating manual imputation by comparing ncm and cnae descriptions for each manual imputation
+manual.imputs <- left_join(manual.imputs, cnae.description, by="cnae") %>% 
+  mutate(hs = substr(ncm, 1, 6),
+         manual.imput = 1) %>% 
+  relocate(hs, .after = ncm)
+save(manual.imputs, file="../02 - Data sets/NCM_CNAE_manual_imputation.Rdata")
+
+# rewriting ibge conversor, now without missing associations
+# identification of NCMs with manual imputation will be preserved for further sensitivity analysis
+ibge.conversor %<>%
+  filter(!is.na(cnae)) %>% 
+  mutate(manual.imput=0) %>% 
+  rbind.data.frame(select(manual.imputs, ncm, hs, cnae, ncm.description, manual.imput)) %>%
+  # there 23 cases of ncmXcnae duplicated values: they will be removed without lost of relevant information
+  filter(!duplicated(select(., ncm, cnae)))
+```
+
+It is worth noting that the IBGE converter leaves some of the NCM codes without any correspondence in the CNAE-1995 classification. These cases correspond to `r as.integer(sum(is.na(ibge.conversor$cnae)))` codes, or `r paste0(format(sum(is.na(ibge.conversor$cnae))*100/nrow(ibge.conversor), digits=4, nsmall=2), "%")` of the total. They will be treated on a case-by-case basis, and they will be manually imputed to one CNAE-95 code following similitude between NCMs and CNAEs descriptions.
+
+# NCM-1996 to CNAE-1995: cases with multiple CNAEs
+
+```{r, warning=FALSE, message=FALSE}
+# recreating table for the ncm.cnae relations (after manual imputation of the missing associations)
+ncm_cnae.relations <- ibge.conversor %>% 
+  group_by(ncm) %>%
+  summarise(cnaes.to.ncm = n_distinct(cnae),
+            na_cnae = max(is.na(cnae)))
+
+# create table for the ncm.cnae relations
+table1 <- as.data.frame(table(ncm_cnae.relations$cnaes.to.ncm)) %>% 
+  mutate(Freq.share = format(Freq*100/sum(Freq), digits=2, nsmall=2)) %>% 
+  arrange(desc(Freq)) %>% 
+  relocate(Freq, .before=Var1) %>%
+  relocate(Freq.share, .before=Var1) %>% 
+  as.data.frame()
+
+# identifying cases with multiple associations
+multiple.cnaes <- unique(ncm_cnae.relations$ncm[ncm_cnae.relations$cnaes.to.ncm>1])
+data.temp <- filter(ibge.conversor,
+                    ncm %in% multiple.cnaes) %>% 
+  left_join(cnae.description, by="cnae") %>% 
+  select(ncm, cnae, ncm.description, cnae.description, manual.imput)
+
+# forcing the attribution of a single CNAE for the duplicated cases
+ibge.conversor %<>% 
+  filter(ncm!="40139000" | cnae=="25194",
+         ncm!="84122900" | cnae=="29122")
+
+# showing cases with multiple associations
+data.temp
+```
+
+There are `r sum(table1$Freq[as.numeric(table1$Var1)>1])` cases where one same NCM code is associated with more than one CNAE-95. These cases are also problematic because we need to either select one particular CNAE-95 to receive the entire value associated with each NCM-1996 code or assume a splitting-rule to divide the value among different CNAEs. Since we have no detailed information to form a splitting-rule, one single CNAE will be selected for each of these cases based on CNAE and NCM descriptions. Fortunately, the vast majority of NCM-1996 codes are associated with a single CNAE-95 (Table 1).
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='asis'}
+kbl(table1,
+    align=c("l", "l", "l"),
+    caption="Table 1: Number of NCM Codes per number of CNAEs associated", booktabs = TRUE,
+    col.names=c("# of NCM codes", "Percentage of total NCM codes", "Distinct CNAEs associated")) %>%
+  kable_styling() %>% 
+  footnote(general = "IBGE", general_title = "Source:", footnote_as_chunk = T)
+``` 
+
+# HS-1996 to CNAE-1995: cases with multiple CNAEs
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE, dependson=c(2,3,4)}
+# creating table for the HS CNAE relations
+hs_cnae.relations <- ibge.conversor %>% 
+  group_by(hs) %>%
+  summarise(cnaes.to.hs = n_distinct(cnae),
+            na_cnae = max(is.na(cnae)))
+
+table2 <- as.data.frame(table(hs_cnae.relations$cnaes.to.hs)) %>% 
+  mutate(Freq.share = format(Freq*100/sum(Freq), digits=2, nsmall=2)) %>% 
+  arrange(desc(Freq)) %>% 
+  relocate(Freq, .before=Var1) %>%
+  relocate(Freq.share, .before=Var1) %>% 
+  as.data.frame()
+
+# downloading SISCOMEX data (imports) for the 1997-1999 period
+temp3.list <- replicate(3, tempfile(fileext=".csv"))
+url.list <- paste0("https://balanca.economia.gov.br/balanca/bd/comexstat-bd/ncm/IMP_", 1997:1999, ".csv")
+mapply(download.file, url.list, temp3.list, MoreArgs = list(method="wininet", mode="wb"))
+
+# munging data on Imports
+data.imp <- lapply(temp3.list, read.csv2)
+data.imp <- rbindlist(data.imp)
+data.imp %<>%
+  select(CO_ANO, CO_NCM, VL_FOB) %>%
+  rename(year = CO_ANO,
+         ncm = CO_NCM,
+         value = VL_FOB) %>% 
+  mutate(ncm = str_pad(ncm, 8, "left", 0))
+
+# downloading data on consumer price index (source: BLS)
+cpi.data <- read.table(file="https://download.bls.gov/pub/time.series/cu/cu.data.1.AllItems", skip=1) %>% 
+  filter(V1=="CUSR0000SA0")%>%
+  select(V2, V3, V4) %>% 
+  rename(year = V2,
+         month = V3,
+         cpi = V4) %>%
+  filter(year %in% 1997:1999) %>% 
+  group_by(year) %>% 
+  summarise(average.index = mean(cpi)) %>% 
+  mutate(average.index = average.index/average.index[1])
+
+# deflating import values (1997=1) and aggregating by NCM
+data.imp <- left_join(data.imp, cpi.data, by="year") %>% 
+  mutate(value2007 = value/average.index) %>% 
+  group_by(ncm) %>% 
+  summarise(imp.value=sum(value2007))
+
+# identifying cases with multiple associations
+multiple.cnaes <- unique(hs_cnae.relations$hs[hs_cnae.relations$cnaes.to.hs>1])
+data.temp <- filter(ibge.conversor,
+                    hs %in% multiple.cnaes) %>% 
+  left_join(cnae.description, by="cnae") %>% 
+  select(ncm, hs, cnae, ncm.description, cnae.description)
+
+# applying splitting rule:
+# w1 corresponds to the first strategy
+# w2 corresponds to the second strategy
+product_sector.crosswalk <- ibge.conversor %>%
+  left_join(cnae.description, by="cnae") %>% 
+  left_join(data.imp, by="ncm") %>% 
+  rename(value.ncm = imp.value) %>% 
+  mutate(value.ncm = replace_na(value.ncm, 0)) %>% 
+  group_by(hs) %>% 
+  mutate(n.cnaes = n_distinct(cnae),
+         value.hs = sum(value.ncm),
+         w.ncm = value.ncm/value.hs,
+         max.w.ncm = max(w.ncm)) %>% 
+  ungroup() %>% 
+  mutate(w1 = case_when(n.cnaes==1 ~ 1,
+                        n.cnaes>1 & value.hs>0 & w.ncm==max.w.ncm ~ 1,
+                        n.cnaes>1 & value.hs>0 & w.ncm<max.w.ncm ~ 0,
+                        TRUE ~ NaN),
+         w2 = case_when(n.cnaes==1 ~ 1,
+                        n.cnaes>1 & value.hs> 0 ~ w.ncm,
+                        TRUE ~ NaN)) %>% 
+  select(ncm, hs, cnae, w1, w2, ncm.description, cnae.description, n.cnaes, manual.imput)
+
+save(product_sector.crosswalk, file="../02 - Data sets/product-sector_crosswalk.Rdata")
+```
+
+The HS classification is more aggregated than the NCM. Thus, working at the HS 6-digits level implies more cases of multiple associations (Table 2). Still, `r format(table2$Freq.share[1], digits=4, nsmall=2)`% of the HS codes were associated with a single CNAE, while the remaining `r format(100-as.numeric(table2$Freq.share[1]), digits=4, nsmall=2)`% had multiple associations -- some had even 5 different CNAEs. To help dealing with those cases, two strategies will be implemented. Both will use detailed information about Brazilian trade flows made available by the [Comex Stat](http://comexstat.mdic.gov.br/pt/home) for the years of 1997-1999. These flows are reported at the NCM level, and thus they have no ambiguity after the adjustments made in the previous two sections. The first strategy will then follow three steps: *i)* we will link each HS code to its respective NCM codes; *ii)* using data from [Comex Stat](http://comexstat.mdic.gov.br/pt/home), we will discover the most relevant (in terms of traded values) NCM code for each HS code; *iii)* finally, we will attribute the entire HS flow to the CNAE linked to its most relevant NCM (according to 1997-1999 trade volume). Alternatively, the second approach will divide the HS flow through multiple CNAEs, following weights defined according to their relative NCM trade volumes. After these procedures, the IBGE converter becomes a crosswalk that allows us to move from HS-1996 to CNAE-1995. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='asis'}
+kbl(table2,
+    align=c("l", "l", "l"),
+    caption="Table 2: Number of HS codes per number of CNAEs associated", booktabs = TRUE,
+    col.names=c("# of HS codes", "Percentage of total HS codes", "Distinct CNAEs associated")) %>%
+  kable_styling() %>% 
+  footnote(general = "IBGE", general_title = "Source:", footnote_as_chunk = T)
+``` 
+
+

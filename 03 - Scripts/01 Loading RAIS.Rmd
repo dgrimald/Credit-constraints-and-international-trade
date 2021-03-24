@@ -1,0 +1,226 @@
+---
+title: "Carregando a RAIS (desidentificada) no data lake"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: united
+    number_sections: false
+---
+
+```{r setup, echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(DBI)){install.packages("DBI")}
+if(!require(odbc)){install.packages("odbc")}
+if(!require(RSQLite)){install.packages("RSQLite")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(data.table)){install.packages("data.table")}
+```
+
+## Description
+
+This code will create a function, called **load_rais()**, that loads information from the raw RAIS (unindentified) files into a single db file. The funcion will use two other lower-level functions (called [**load_estab**](file:///C:/Users/danie/OneDrive%20-%20George%20Mason%20University/03%20-%20research%20projects/Credit%20constraints%20and%20international%20trade/03%20-%20Scripts/01a-Creating-load_estab.html) and [**load_vinc**](file:///C:/Users/danie/OneDrive%20-%20George%20Mason%20University/03%20-%20research%20projects/Credit%20constraints%20and%20international%20trade/03%20-%20Scripts/01a-Creating-load_vinc.html)) and it will accept the following arguments:
+
+1. year: an integer value defining the year that should be loaded with information from RAIS;
+2. db.file: a character value defining the name (full.path) of the db file that should receive the information;
+3. db.table: a character value defining the suffix for the name of the Table(s) within db.file that should receive the information. Have in mind that if type is equal to BOTH, two tables will be created (db.table_estab and db.table_vinc);
+4. type: a character value defining if the function should load data from companies ("ESTAB"), from workers ("VINC"), or both ("BOTH"). The default value is "BOTH"; 
+5. append: a logical value indicating if the information should be appended to an existing table (TRUE), or should be added to a new table (FALSE). If a a new table is created, it will overwrite other existing ones with that same name that might exist in the db.file. The default is TRUE.
+
+Since RAIS files might be too large, **load_rais** will have no parallelism built into it.
+
+**Chunk 1: Creating local function load_rais()**
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+load_rais <- function(year, type, db.file, db.table, db.append){
+  
+  # loading required lower-level functions
+  source("load_estab.R")
+  
+  # setting the folder where all information from original RAIS files are stored
+  main.source <- "C:/Users/danie/OneDrive - George Mason University/01 - datalake/RAIS/RAIS - LAI"
+  
+  # checking consistency for year argument
+  if(!year %in% c(1994:2018)){
+    stop("Please select a valid year to load RAIS data (from 1994 to 2018). The layout of the year you requested has not been incorporated to the routine yet.")
+  }
+  
+  # checking consistency for type argument
+  not.valid <- case_when(type=="ESTAB" ~ 0,
+                         type=="VINC" ~ 0,
+                         TRUE ~ 1)
+  if(not.valid){
+    stop("Please select a valid type to load RAIS data. The available options are ESTAB, VINC, or BOTH")
+  }
+  
+  # checking consistency for db.file argument
+  not.valid <- !dir.exists(substr(db.file,
+                                  start=1,
+                                  stop=max(gregexpr("/", db.file)[[1]])-1))
+  if(not.valid){
+    stop("Please provide a valid path for the db.file. The provided folder where db.file should be does not exist.")
+  }
+  
+  if(type=="ESTAB"){
+    source("load_estab.R")
+    
+    # define variable to keep
+    old.names <- function(year){
+      if(year==1994){
+        c("MUNICIPIO", "ESTOQUE", "NAT ESTB", "TIPO ESTB", "CLAS CNAE 95", "SUBATIV IBGE", "SUBS IBGE")
+      }else if(year %in% c(1995, 1996, 1997, 1998)){
+        c("MUNICIPIO", "ESTOQUE", "NAT JURID", "TIPO ESTB", "IND RAIS NEG", "CLAS CNAE 95", "SUBS IBGE")
+      }else if(year %in% c(1999:2001)){
+        c("MUNICIPIO", "ESTOQUE", "NAT JURID", "TIPO ESTB", "IND RAIS NEG", "IND SIMPLES", "IND CEI VINC", "CLAS CNAE 95", "SUBS IBGE")
+      }else if (year %in% c(2002:2005)){
+        c("Município", "Qtd Vínculos Ativos", "Natureza Jurídica", "Tipo Estab", "Ind Rais Negativa", "Ind Simples", "Ind CEI Vinculado", "CNAE 95 Classe")
+      }else if (year %in% c(2006:2013)){
+        c("Município", "Qtd Vínculos Ativos", "Natureza Jurídica", "Tipo Estab", "Ind Rais Negativa", "Ind Simples", "Ind CEI Vinculado", "Ind Atividade Ano", "CNAE 95 Classe", "CNAE 2.0 Classe")
+      }else if (year %in% c(2014:2018)){
+        c("Município", "Qtd Vínculos Ativos", "Natureza Jurídica", "Tipo Estab", "Ind Rais Negativa", "Ind Simples", "Ind CEI Vinculado", "Ind Atividade Ano", "CNAE 95 Classe", "CNAE 2.0 Classe", "IBGE Subsetor")
+      }else{
+        stop("This year is not yet supported. Please incorporate a new layout to load RAIS ESTAB.")
+      }
+    }
+    list.names.keep <- lapply(1994:2018, old.names)
+    names(list.names.keep) <- 1994:2018
+    
+    # define new names to be attributed to these variables
+    new.names <- function(year){
+      if(year==1994){
+        c("municipio", "total.emp", "nat.estab", "tipo.estab", "cnae95", "subativ.ibge", "subset.ibge")
+      }else if(year %in% c(1995, 1996, 1997, 1998)){
+        c("municipio", "total.emp", "nat.jurid", "tipo.estab", "ind.neg", "cnae95", "subset.ibge")
+      }else if(year %in% c(1999: 2001)){
+        c("municipio", "total.emp", "nat.jurid", "tipo.estab", "ind.neg", "ind.simples", "ind.cei", "cnae95", "subset.ibge")
+      }else if (year %in% c(2002:2005)){
+        c("municipio", "total.emp", "nat.jurid", "tipo.estab", "ind.neg", "ind.simples", "ind.cei", "ind.ativ", "cnae95", "cnae20", "subset.ibge")
+      }else if (year %in% c(2006:2013)){
+        c("municipio", "total.emp", "nat.jurid", "tipo.estab", "ind.neg", "ind.simples", "ind.cei", "ind.ativ", "cnae95", "cnae20")
+      }else if (year %in% c(2014:2018)){
+        c("municipio", "total.emp", "nat.jurid", "tipo.estab", "ind.neg", "ind.simples", "ind.cei", "ind.ativ", "cnae95", "cnae20", "subset.ibge")
+      }else{
+        stop("This year is not yet supported. Please incorporate a new layout to load RAIS ESTAB.")
+      }
+    }
+    list.names.input <- lapply(1994:2018, new.names)
+    names(list.names.input) <- 1994:2018
+    
+    # load raw data
+    data.i <- load_estab(year=year, main.source=main.source, n.registries=100)
+    
+    # select and rename variables
+    data.i <- select(data.i,
+                     matches(list.names.keep[[as.character(year)]]))
+    names(data.i) <- list.names.input[[as.character(year)]]
+    
+    # set a standard, keeping every year with the same set of vars and compatibilizing subset.ibge before and after 2005
+    ## SUBS IBGE e IBGE Subsetor bring the same info, with the same level of detail, but different codings. This code will make them compatible.
+    set.standard <- function(data, vars){
+      missing.vars <- setdiff(vars, names(data))
+      fill <- as.data.frame(matrix(nrow=nrow(data), ncol=length(missing.vars)))
+      names(fill) <- missing.vars
+      data <- cbind.data.frame(data, fill) %>%
+        mutate(year = year,
+               subset.ibge = case_when(year<=2005 & subset.ibge=="EXTR MINERAL" ~ 1,
+                                       year<=2005 & subset.ibge=="MIN NAO MET" ~ 2,
+                                       year<=2005 & subset.ibge=="IND METALURG" ~ 3,
+                                       year<=2005 & subset.ibge=="IND MECANICA" ~ 4,
+                                       year<=2005 & subset.ibge=="ELET E COMUN" ~ 5,
+                                       year<=2005 & subset.ibge=="MAT TRANSP" ~ 6,
+                                       year<=2005 & subset.ibge=="MAD E MOBIL" ~ 7,
+                                       year<=2005 & subset.ibge=="PAPEL E GRAF" ~ 8,
+                                       year<=2005 & subset.ibge=="BOR FUM COUR" ~ 9,
+                                       year<=2005 & subset.ibge=="IND QUIMICA" ~ 10,
+                                       year<=2005 & subset.ibge=="IND TEXTIL" ~ 11,
+                                       year<=2005 & subset.ibge=="IND CALCADOS" ~ 12,
+                                       year<=2005 & subset.ibge=="ALIM E BEB" ~ 13,
+                                       year<=2005 & subset.ibge=="SER UTIL PUB" ~ 14,
+                                       year<=2005 & subset.ibge=="CONSTR CIVIL" ~ 15,
+                                       year<=2005 & subset.ibge=="COM VAREJ MET" ~ 16,
+                                       year<=2005 & subset.ibge=="COM ATACAD" ~ 17,
+                                       year<=2005 & subset.ibge=="INST FINANC" ~ 18,
+                                       year<=2005 & subset.ibge=="ADM TEC PROF" ~ 19,
+                                       year<=2005 & subset.ibge=="TRAN E COMUN" ~ 20,
+                                       year<=2005 & subset.ibge=="ALOJ COMUNIC" ~ 21,
+                                       year<=2005 & subset.ibge=="MED ODON VET" ~ 22,
+                                       year<=2005 & subset.ibge=="ENSINO" ~ 23,
+                                       year<=2005 & subset.ibge=="ADM PUBLICA" ~ 24,
+                                       year<=2005 & subset.ibge=="AGRICULTURA" ~ 25,
+                                       TRUE ~ subset.ibge)) %>% 
+        select(year, municipio, total.emp, starts_with("nat"), starts_with("tipo"), starts_with("ind"), starts_with("cnae"), ends_with("ibge"))
+      data
+    }
+    data.i <- set.standard(data=data.i, vars=unique(unlist(list.names.input)))
+  }
+  
+  if(type=="VINC"){}
+  
+  SQLCon <- dbConnect(drv = SQLite(), dbname=db.file)
+  dbWriteTable(SQLCon, db.table, data.i, append=db.append)
+  dbDisconnect(SQLCon)
+  
+  ## RAIS VINC
+  var.list.vinc <- if(year %in% c(1994:2014)){
+    c("Mun Trab", "Vl Remun Média Nom", "Vl Remun Dezembro Nom", "Vínculo Ativo 31/12", "Tipo Vínculo", "Tempo Emprego", "CBO Ocupação 2002", "Idade", "Escolaridade após 2005", "Raça Cor", "Sexo Trabalhador", "Município", "Tipo Estab", "Ind Simples", "Natureza Jurídica", "CNAE 95 Classe", "CNAE 2.0 Classe", "IBGE Subsetor")
+  }else  
+   
+  
+  # dumping companies information into db.file
+  if(type %in% c("BOTH", "ESTAB")){
+   #  extracting estab file (requires 7zip)
+   command.estab <- paste("7z x ", shQuote(estab.file), " -o", shQuote(using.folder), "", sep="")
+   system(command.estab)
+   file.i <- list.files(using.folder, full.names=TRUE)[1]
+   # loading into R
+   data.estab <- fread(file=file.i)
+   # cleaning using folder (it always has only one file)
+   unlink(file.i, recursive = FALSE)
+
+   
+
+   
+  }
+  
+  # extract VINC files (requires 7zip)
+  if(type %in% c("BOTH", "VINC")){
+    # build command line for all VINC files 
+    command.vinc.i <- paste("7z x ", shQuote(vinc.files), " -o", shQuote(using.folder), "", sep="")
+    # build function that load each one
+    read.vinc <- function(case, year=year, env=parent.frame()){
+      system(case)
+      file.i <- list.files(env$using.folder, full.names=TRUE)[1]
+      data.vinc <- fread(file=file.i)
+      unlink(file.i, recursive=FALSE)
+      data.vinc <- data.vinc[,..env$var.list.vinc]
+      names(data.vinc) <- 
+      
+    }
+  # apply function to every VINC file
+  lapply(command.vinc.i[1:2], system)
+   }
+  
+  # loading estab file into R and dumping into the db file
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+  
+  
+  
+}
+
+```
+
+
+
+
+
+
+
+
