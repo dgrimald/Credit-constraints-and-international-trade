@@ -58,21 +58,21 @@ mac.data %<>%
 # joining with definition of Brazilian regions
 mun_region.crosswalk <- regions.data %>% 
   left_join(mac.data, by=c("CD_GEOCODI"="id_municipio")) %>% 
-  rename(nome.mun = nome_mun,
-         nome.microregion = nome_rgi,
-         nome.macroregion = nome_rgint, 
-         id.mun = CD_GEOCODI,
-         id.microregion = cod_rgi,
-         id.macroregion = cod_rgint,
-         id.mca = id_AMC
+  rename(mun.name = nome_mun,
+         microregion.name = nome_rgi,
+         macroregion.name = nome_rgint, 
+         mun.id = CD_GEOCODI,
+         microregion.id = cod_rgi,
+         macroregion.id = cod_rgint,
+         mca.id = id_AMC
         ) %>% 
-  select(id.mun, id.microregion, id.macroregion, id.mca, nome.mun, nome.microregion, nome.macroregion)
+  select(mun.id, microregion.id, macroregion.id, mca.id, mun.name, microregion.name, macroregion.name)
 ```
 
 [Earl (2017)](https://www.scielo.br/scielo.php?script=sci_arttext&pid=S0101-41612017000100215) establishes MCAs between 1991 and 2010. Still, as Table 1 shows, 5 new municipalities were created after 2010. These 5 new municipalities are going to be manually attributed to the MCA that encompass the original municipality from which the new municipalities splitted. The information used to guide this manual imputation is consolidated in Table 2.
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE, results='asis'}
-table1 <- as.data.frame(mun_region.crosswalk[is.na(mun_region.crosswalk$id.mca),])
+table1 <- as.data.frame(mun_region.crosswalk[is.na(mun_region.crosswalk$mca.id),])
 kbl(table1,
     align=c("l", "l", "l"),
     caption="Table 1: Municipalities created after 2010", booktabs = TRUE) %>%
@@ -92,16 +92,18 @@ kbl(table1,
 
 ```{r, warning=FALSE, message=FALSE}
 mun_region.crosswalk %<>%
-  mutate(id.mca = case_when(nome.mun=="Mojuí dos Campos" ~ 2020,
-                            nome.mun=="Balneário Rincão" ~ 14413,
-                            nome.mun=="Pescaria Brava" ~ 14440,
-                            nome.mun=="Pinto Bandeira" ~ 15038,
-                            nome.mun=="Paraíso das Águas" ~ 1103,
-                            TRUE ~ id.mca))
+  mutate(mca.id = case_when(mun.name=="Mojuí dos Campos" ~ 2020,
+                            mun.name=="Balneário Rincão" ~ 14413,
+                            mun.name=="Pescaria Brava" ~ 14440,
+                            mun.name=="Pinto Bandeira" ~ 15038,
+                            mun.name=="Paraíso das Águas" ~ 1103,
+                            TRUE ~ mca.id))
 ```
 
-With that manual imputation, all the `r length(unique(mun_region.crosswalk$id.mun))` municipalities are associated with `r length(unique(mun_region.crosswalk$id.mca))` MCAs, `r length(unique(mun_region.crosswalk$id.microregion))` microregions, and `r length(unique(mun_region.crosswalk$id.macroregion))` macroregions.
+With that manual imputation, all the `r length(unique(mun_region.crosswalk$mun.id))` municipalities are associated with `r length(unique(mun_region.crosswalk$mca.id))` MCAs, `r length(unique(mun_region.crosswalk$microregion.id))` microregions, and `r length(unique(mun_region.crosswalk$macroregion.id))` macroregions.
 
 ```{r, warning=FALSE, message=FALSE}
+mun_region.crosswalk %<>%
+  mutate(mun.id = substr(mun.id, 1, 6))
 save(mun_region.crosswalk, file="../02 - Data sets/mun-region_crosswalk.Rdata")
 ```

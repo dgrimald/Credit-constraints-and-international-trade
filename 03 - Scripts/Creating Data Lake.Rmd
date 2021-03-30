@@ -14,6 +14,7 @@ if(!require(DBI)){install.packages("DBI")}
 if(!require(odbc)){install.packages("odbc")}
 if(!require(RSQLite)){install.packages("RSQLite")}
 if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(readxl)){install.packages("readxl")}
 if(!require(magrittr)){install.packages("magrittr")}
 if(!require(data.table)){install.packages("data.table")}
 ```
@@ -46,13 +47,13 @@ data_lake <- dbConnect(RSQLite::SQLite(), dbname="../02 - Data sets/data_lake.db
 
 **DDL command for creating table municipalities**
 ```{sql connection=data_lake}
-create table municipalities(
-'id.mun' varchar(7),
-'id.microregion' varchar(6),
-'id.macroregion' varchar(4),
-'id.mca' varchar(5),
-'name.mun' varchar (35),
-primary key ('id.mun')
+CREATE TABLE IF NOT EXISTS MUNICIPALITIES(
+'mun.id' varchar(6),
+'microregion.id' varchar(6),
+'macroregion.id' varchar(4),
+'mca.id' varchar(5),
+'mun.name' varchar (35),
+PRIMARY KEY ('mun.id')
 );
 ```
 
@@ -61,36 +62,71 @@ primary key ('id.mun')
 ```{r warning=FALSE, message=FALSE}
 load("../02 - Data sets/mun-region_crosswalk.Rdata")
 mun_region.crosswalk %<>%
-  mutate(id.mca = str_pad(id.mca, 5, "left", "0")) %>% 
-  select(id.mun, id.microregion, id.macroregion, id.mca, nome.mun) %>% 
-  rename(name.mun = nome.mun)
-dbWriteTable(data_lake, "municipalities", mun_region.crosswalk, append=TRUE)
+  mutate(mca.id = str_pad(mca.id, 5, "left", "0")) %>% 
+  select(mun.id, microregion.id, macroregion.id, mca.id, mun.name)
+dbWriteTable(data_lake, "MUNICIPALITIES", mun_region.crosswalk, append=TRUE)
 ```
-
-## Table for companies
-
-
-
-## Table for employment relationships
-
-
 
 ## Table for Economic Sectors
 
 ```{sql connection=data_lake}
-create table economic_sectors(
-'cnae' varchar(5),
-'cnae.description' varchar(200),
-primary key ('cnae')
+CREATE TABLE IF NOT EXISTS ECONOMIC_SECTORS(
+'cnae95' INTEGER,
+'cnae.description' varchar(255),
+PRIMARY KEY ('cnae95')
 );
 ```
 
 ```{r warning=FALSE, message=FALSE}
-load("../02 - Data sets/product-sector_crosswalk.Rdata")
-econ_sectors  <- product_sector.crosswalk %>%
-  select(cnae, cnae.description) 
-dbWriteTable(data_lake, "economic_sctors", econ_sectors, append=TRUE)
+temp <- tempfile(fileext = ".xls")
+download.file(url="https://cnae.ibge.gov.br/images/concla/downloads/CNAE.xls",
+              destfile = temp,
+              method="wininet",
+              mode="wb")
+
+# munging data on CNAE description
+econ.sectors<- read_excel(temp, skip=7)
+econ.sectors <- econ.sectors[,c(4:5)]
+names(econ.sectors) <- c("cnae95", "cnae.description")
+econ.sectors %<>%
+  mutate(cnae95 = gsub("[:.:]", "", cnae95),
+         cnae95 = as.numeric(gsub("-", "", cnae95))) %>% 
+  na.omit()
+dbWriteTable(data_lake, "ECONOMIC_SECTORS", econ.sectors, append=TRUE)
 ```
+
+## Table for companies
+```{sql connection=data_lake}
+CREATE TABLE IF NOT EXISTS COMPANIES(
+'company.id' TEXT,
+year INTEGER,
+'mun.id' varchar(6),
+'total.emp' NUMERIC,
+'legal.status.1994' NUMERIC,
+'legal.status.pos94' NUMERIC,
+'type.company' INTEGER,
+'ind.neg' INTEGER,
+'ind.simples' INTEGER,
+'ind.cei' INTEGER,
+'ind.active' INTEGER,
+cnae95 INTEGER,
+cnae20 INTEGER,
+PRIMARY KEY ('company.id'),
+FOREIGN KEY ('mun.id') references MUNICIPALITIES on delete set null,
+FOREIGN KEY (cnae95) references ECONOMIC_SECTORS on delete set null
+);
+```
+
+```{r warning=FALSE, message=FALSE}
+source("load_estab.R")
+source("munging_rais.R")
+data <- munging_rais(1994, type="ESTAB")
+dbWriteTable(data_lake, "COMPANIES", data, append=TRUE)
+```
+
+## Table for employment relationships
+
+
 
 ## Table for the Product-Sector Crosswalk
 
