@@ -1,0 +1,120 @@
+---
+title: "Creating function munging_estban"
+author: "Daniel Grimaldi / PhD Student at Schar School of Public Policy / dgrimald@gmu.edu"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: united
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 100, digits = 4)
+```
+
+**Loading packages**
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(knitr)
+if(!require(kableExtra)){install.packages("kableExtra")}
+if(!require(DBI)){install.packages("DBI")}
+if(!require(odbc)){install.packages("odbc")}
+if(!require(RSQLite)){install.packages("RSQLite")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(data.table)){install.packages("data.table")}
+```
+
+# Estban dataset
+
+Estatística Bancária Mensal (ESTBAN) is a data set with information about commercial banks' balance sheet in the Brazilian Economy. ESTBAN brings monthly information at the level of bank's branches.^[https://www4.bcb.gov.br/fis/cosif/estban.asp?frame=1] This dataset is consolidated by the Brazilian Central Bank (BCB) on a monthly basis with a 90 days lag. Overall information about the dataset and its main account can be consulted in the [COSIF Manual](https://www3.bcb.gov.br/aplica/cosif/completo). 
+
+This R-script will load and consolidate a subset of previously downloaded files from ESTBAN for the 1994-2018 period.^[The download was implemented in a different R-script. Details can be consulted at https://bit.ly/3cB3GF4.] This consolidation process required a selection and transformation of variables. The code bewllos shows how each created variable relates to the original ones, as defined by the accounting plan^[The number associated with each verbet number in the original files can be consulted on pp. 588-590 in the [COSIF Manual](https://www3.bcb.gov.br/aplica/cosif/completo)].
+
+**Creating munging_estban**
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+munging_estban <- function(file){
+
+  # load file and select information
+data_i <-read_delim(file, delim = ";", skip = 2, locale=locale(encoding = "ISO-8859-1")) %>%
+  select(
+    `#DATA_BASE`,
+    CODMUN_IBGE,
+    NOME_INSTITUICAO,
+    CNPJ,
+    AGENCIA,
+    VERBETE_399_TOTAL_DO_ATIVO,
+    VERBETE_110_ENCAIXE,
+    VERBETE_160_OPERACOES_DE_CREDITO:VERBETE_176_OPERACOES_ESPECIAIS,
+    VERBETE_899_TOTAL_DO_PASSIVO,
+    `VERBETE_401_SERVICOS_PUBLICOS + VERBETE_402_ATIVIDADES_EMPRESARIAIS + VERBETE_403_ESPECIAIS_DO_TESOURO_NACIONAL + VERBETE_404_SALDOS_CREDORES_EM_CONTAS_DE_EMPRESTIMOS_E_FINAN + VERBETE_411_DE_PESSOAS_FISICAS + VERBETE_412_DE_PESSOAS_JURIDICAS + VERBETE_413_DE_INSTITUICOES_FINANCEIRAS + VERBETE_414_JUDICIAIS + VERBETE_415_OBRIGATORIOS + VERBETE_416_PARA_INVESTIMENTOS + VERBETE_417_VINCULADOS + VERBETE_418_DEMAIS_DEPOSITOS + VERBETE_419_SLD_CRED_CTAS_EMPR_FINANC_OUTR`,
+    VERBETE_420_DEPOSITOS_DE_POUPANCA,
+    VERBETE_430_DEPOSITOS_INTERIFNANCEIROS,
+    VERBETE_440_REL_INTERFINANC_E_INTERDEPEND,
+    VERBETE_460_OBRIG_POR_EMP_E_REPASSES,
+    VERBETE_610_PATRIMONIO_LIQUIDO,
+    VERBETE_710_CONTAS_DE_RESULTADO)
+
+# rename variables
+names(data_i) <- c("data.base",
+                   "municipio",
+                   "nome",
+                   "cnpj.raiz",
+                   "cod.agencia",
+                   "ativo.total",
+                   "disponibilidades",
+                   "total.credito",
+                   "credito.161",
+                   "credito.162",
+                   "credito.163",
+                   "credito.164",
+                   "credito.165",
+                   "credito.166",
+                   "credito.167",
+                   "credito.169",
+                   "credito.171",
+                   "credito.172",
+                   "credito.173",
+                   "credito.174",
+                   "credito.176",
+                   "total.passivo",
+                   "depositos.vista",
+                   "depositos.poupanca",
+                   "depositos.interfinanceiros",
+                   "relacoes.interfinanceiras",
+                   "obrigacoes.emprestimos",
+                   "patrimonio.liquido",
+                   "resultado")
+
+# consolidate information
+data_i <- mutate(data_i,
+                 cnpj.raiz=as.numeric(cnpj.raiz),
+                 municipio=floor(municipio/10),
+                 credito.rural = credito.163+credito.167+credito.165+credito.166,
+                 credito.imobiliario = credito.169,
+                 credito.provisao = credito.174,
+                 year=as.numeric(substr(data.base, start=1, stop=4)),
+                 month=as.numeric(substr(data.base, start=5, stop=6))) %>% 
+  as.data.frame() %>% 
+  select(cod.agencia, year, month, cnpj.raiz, nome, ativo.total, total.passivo, patrimonio.liquido, resultado, depositos.vista, depositos.poupanca, depositos.interfinanceiros, total.credito, credito.rural, credito.imobiliario, municipio) %>%
+  rename(branch_id = cod.agencia, 
+         bank_id = cnpj.raiz,
+         bank_name = nome,
+         total_assets = ativo.total,
+         total_liabilities = total.passivo,
+         net_assets = patrimonio.liquido,
+         net_results = resultado,
+         short_term_deposits = depositos.vista,
+         long_term_deposits = depositos.poupanca,
+         interbank_deposits = depositos.interfinanceiros,
+         total_loans = total.credito,
+         rural_loans= credito.rural,
+         housing_loans = credito.imobiliario,
+         mun_id = municipio) %>% 
+  mutate(branch_id = gsub("\'", "", branch_id),
+         mun_id = as.character(mun_id)) %>% 
+  na.omit()
+  data_i
+  }
+dump("munging_estban", file="munging_estban.R")
+```
+

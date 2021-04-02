@@ -1,0 +1,366 @@
+---
+title: "Data Lake creation: final assignment for CDS-502"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: paper
+    number_sections: false
+bibliography: references.bib
+---
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+if(!require(DBI)){install.packages("DBI")}
+if(!require(odbc)){install.packages("odbc")}
+if(!require(RSQLite)){install.packages("RSQLite")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(readxl)){install.packages("readxl")}
+if(!require(magrittr)){install.packages("magrittr")}
+if(!require(data.table)){install.packages("data.table")}
+source("munging_estban.R")
+source("munging_rais.R", encoding = "Windows-1252")
+source("load_estab.R")
+source("load_vinc.R")
+```
+
+# <a name="Introduction"></a>Introduction
+
+This script creates a data lake designed specifically to support @grimaldi2021. Three main sources of information form this data set: i) locality-sector employment levels comes from the Annual Registry for Social Information ([RAIS](https://ces.ibge.gov.br/base-de-dados/metadados/mte/relacao-anual-de-informacoes-sociais-rais.html)); ii) trade flows are extracted from the United Nations International Trade Statitics (UNComtrade); and iii) information on banks' branches at the municipality level are obtained through Municipality Banking Statistics (ESTBAN).
+
+RAIS is a rich employer-employee data set administered by the Brazilian Ministry of Economy and has been intensively used for social science research (see, for instance, @ulyssea2018 and @dix-carneiro2017). Compliance with RAIS is mandatory, so it can be understood as a census of Brazil's formal businesses. RAIS has two different versions. The confidential one is more detailed and allows the researcher to follow companies and employees across time, as well as to link employers with their employees. @grimaldi2021 will use the public version, where information about companies and employees can only be consolidated at the municipality-level.
+
+[UNComtrade](comtrade.un.org) provides product-level data for worldwide trade flows. Information on imports from China will be extracted at the 6-digits level of the Harmonized System classification. Linking this information with economic activity within Brazilian regions will require a crosswalk step to transform product-level into economic-sector trade flows.
+
+Finally, [ESTBAN](https://www4.bcb.gov.br/fis/cosif/estban.asp?frame=1) is a data set administered by the Brazilian Central Bank with detailed banking activity information. In particular, it reveals the existence of banking branches within Brazilian regions, as well as their level of credit concession. Consolidating data from ESTBAN allows the researcher to have a clear view of the local banking markets across different Brazilian regions.
+
+The Entity-Relationship Diagram depicted in Figure 1 summarizes the design proposed for the data lake. It is possible to notice the existence of 6 entities. *Localities* define regions inside the Brazilian territory, where municipalities are the smallest political-administrative units. This entity integrates all other entities, since all information will be consolidated at a regional-level for the the econometrics approach defined in @grimaldi2021. Information from RAIS will feed other two entities: *Companies* and *Employment relationships*, while data from ESTBAN is integrated into an entity called *Bank branches*. Data from UNComtrade is consolidated into table *International trade flows*. This information must be converted into *Economic Sectors* -- again following the empirical strategy in @grimaldi2021. The following section in this document will present the relational schema that arises from this E-R diagram, and it will delve deeper into the details associated with the creation of each table in this data lake.
+
+<center>
+
+**Figure 1: Data lake E-R Diagram**
+
+</center>
+
+<a href="https://exchangelabsgmu-my.sharepoint.com/:i:/g/personal/dgrimald_masonlive_gmu_edu/ETAf8ul5_A5KmptHaUdCTr4B_mURGhu7lvy4gWuhMIrw3w?e=jqt2i1"> <img src="../02 - Data sets/data lake design/E-R Diagram - Public Version v2.png" title="E-R Diagram for the proposed data lake" alt="E-R Diagram"/> </a>
+
+# The Relational Schema and the creation of the data lake
+
+<center>
+
+**Figure 2: Relational Schema**
+
+</center>
+
+<a href="https://exchangelabsgmu-my.sharepoint.com/:i:/g/personal/dgrimald_masonlive_gmu_edu/EcR_LoAtxFxMvBlhcf0RBr0BUuW1wacH8K601G358cNOFQ?e=0py32I"> <img src="../02 - Data sets/data lake design/Relational Schema.png" title="Relational Schema for the proposed data lake" alt="Relational Schema"/> </a>
+
+```{r warning=FALSE, message=FALSE}
+# Creating initial connection from scratch
+unlink("../02 - Data sets/rp2.db")
+data_lake <- dbConnect(RSQLite::SQLite(), dbname="../02 - Data sets/rp2.db")
+```
+
+## Localities
+
+**Creating table LOCALITIES**
+
+```{sql connection=data_lake}
+CREATE TABLE IF NOT EXISTS LOCALITIES(
+mun_id varchar(6),
+microregion_id  varchar(6),
+macroregion_id varchar(4),
+mca_id varchar(5),
+mun_name varchar (55),
+PRIMARY KEY (mun_id)
+);
+```
+
+**Loading information into LOCALITIES**
+
+```{r warning=FALSE, message=FALSE}
+load("../02 - Data sets/mun-region_crosswalk.Rdata")
+mun_region.crosswalk %<>%
+  mutate(mca.id = str_pad(mca.id, 5, "left", "0")) %>% 
+  select(mun.id, microregion.id, macroregion.id, mca.id, mun.name)
+names(mun_region.crosswalk) <- c("mun_id", "microregion_id", "macroregion_id", "mca_id", "mun_name")
+dbWriteTable(data_lake, "LOCALITIES", mun_region.crosswalk, append=TRUE)
+```
+
+## International trade flows
+
+Following the previous literature on shift-share designs [@adao_2019], @grimaldi2021 will use data from Mercosur countries to isolate external competitiveness pressures from internal demand-driven elements. For that purpose, data on international trade flows from China, Brazil and the remaining Mercosur countries were downloaded from UNComtrade.[^1]
+
+[^1]: The download was implemented through a different R-script. The details are available at <https://bit.ly/3sDmdGk>.
+
+**Creating table TRADE_FLOWS**
+```{sql connection=data_lake}
+CREATE TABLE IF NOT EXISTS TRADE_FLOWS(
+product_id integer,
+year integer,
+reporter_id integer,
+partner_id integer,
+flow_type varchar(10),
+trade_value double,
+product_classification varchar(2),
+PRIMARY KEY (product_id, year, reporter_id, partner_id, flow_type)
+);
+```
+
+**Loading information into TRADE_FLOWS**
+```{r warning=FALSE, message=FALSE}
+# defining source-files
+uncomtrade.files <- paste0("../../../01 - datalake/UNComtrade/",
+                          unzip("../../../01 - datalake/UNComtrade/UNComtrade_original_files.zip", list=TRUE)$Name)
+
+# unzipping files
+unzip("../../../01 - datalake/UNComtrade/UNComtrade_original_files.zip", exdir="../../../01 - datalake/UNComtrade")
+
+# loading files and consolidating one single table:
+data.uncomtrade <- rbindlist(lapply(uncomtrade.files, read_csv)) %>% 
+  select(commodity.code, year, reporter.code, partner.code, flow, value, classification) %>% 
+  rename(product_id = commodity.code,
+         reporter_id = reporter.code,
+         partner_id = partner.code,
+         flow_type = flow,
+         product_classification = classification,
+         trade_value = value)
+
+# removing unzipped version of the files
+file.remove(uncomtrade.files)
+
+# dumping into the data lake
+dbWriteTable(data_lake, "TRADE_FLOWS", data.uncomtrade, append=TRUE)
+```
+
+## Economic Sectors
+
+As previously mentioned in Section [Introduction](#Introduction), @grimaldi2021 will consolidate economic activities using a specific Brazilian sectorial classification. This classification is denominated CNAE-1995, and it was designed by the [Brazilian Institute of Geography and Statistics (IBGE)](https://concla.ibge.gov.br/busca-online-cnae.html).      
+
+**Creating table ECONOMIC_SECTORS**
+```{sql connection=data_lake}
+CREATE TABLE IF NOT EXISTS ECONOMIC_SECTORS(
+sector_id integer,
+sector_description varchar(255),
+sector_classification varchar(10),
+PRIMARY KEY (sector_id)
+);
+```
+
+**Loading information into ECONOMIC_SECTORS**
+```{r warning=FALSE, message=FALSE}
+# downloading file from IBGE
+temp <- tempfile(fileext = ".xls")
+download.file(url="https://cnae.ibge.gov.br/images/concla/downloads/CNAE.xls",
+              destfile = temp,
+              method="wininet",
+              mode="wb")
+
+# munging data on CNAE description
+econ.sectors<- read_excel(temp, skip=7)
+econ.sectors <- econ.sectors[,c(4:5)]
+names(econ.sectors) <- c("sector_id", "sector_description")
+econ.sectors %<>%
+  mutate(sector_id = gsub("[:.:]", "", sector_id),
+         sector_id = as.numeric(gsub("-", "", sector_id)),
+         sector_classification = "cnae95") %>%
+  select(sector_id, sector_description, sector_classification) %>% 
+  na.omit() %>% 
+  as.data.frame()
+
+dbWriteTable(data_lake, "ECONOMIC_SECTORS", econ.sectors, append=TRUE)
+
+# remove downloaded version of the file
+file.remove(temp)
+```
+
+## <a name="Product-Sector Crosswalk"></a> Product-Sector Crosswalk
+
+This product-sector crosswalk was developed to allow researchers to convert international trade information from the 6-digits 1996 Harmonized System (HS-1996) to the 5-digits CNAE-1995. There are different (newer) versions for both the HS product classification and CNAE economic sector classification. However, using these two specific versions allows us to work with a long time-series (1994-2018) while minimizing the number of crosswalk procedures. 
+
+IBGE developed a converter linking the product classification used by Mercosur (NCM-1996) to CNAE-1995. NCM-1996 is fully compatible with HS-1996, but the first one is a more detailed classification -- it uses up to 8-digits codes. The conversion from NCM-1996 to HS-1996 was simple, though, because it required only a sequence of code aggregations. Unfortunately, those aggregations lead to occurrences of multiple associations (cases where one same 6-digits HS-1996 is linked with more than one 5-digits CNAE-1995 code).  
+
+To help dealing with those cases, two strategies were implemented. Both used detailed information about Brazilian trade flows made available by the [Comex Stat](http://comexstat.mdic.gov.br/pt/home) for the years of 1997-1999. These flows are reported at the NCM level, and thus they have no cases of multiple associations. The first strategy followed three steps: *i)* it linked each HS code to its respective NCM codes; *ii)* using data from [Comex Stat](http://comexstat.mdic.gov.br/pt/home), it identified the most relevant (in terms of traded values) NCM code for each HS code; *iii)* finally, it attributed the entire HS flow to the CNAE linked to its most relevant NCM (according to 1997-1999 trade volume). Alternatively, the second approach divided the HS flow through multiple CNAEs, following weights defined according to their relative NCM trade volumes. After these procedures, the IBGE converter became a crosswalk that allows us to move from HS-1996 to CNAE-1995. Variables *w1* and *w2* in the *PRODUCT_SECTOR_CROSSWALK* table represent these two different strategies.^[The entire process to reach these values (including the download of the original data sources) was implemented in a separate R-script. The details can be consulted at https://bit.ly/2QNBXZ7.]
+
+**Creating table PRODUCT_SECTOR_CROSSWALK**
+```{sql connection=data_lake}
+create table IF NOT EXISTS PRODUCT_SECTOR_CROSSWALK(
+product_id integer,
+sector_id integer,
+manual_implementation integer,
+w1 integer, 
+w2 integer,
+primary key (product_id, sector_id, w1, w2),
+foreign key (product_id) references TRADE_FLOWS on delete NO ACTION,
+foreign key (sector_id) references ECONOMIC_SECTORS on delete NO ACTION
+);
+```
+
+**Loading information into PRODUCT_SECTOR_CROSSWALK**
+```{r warning=FALSE, message=FALSE}
+load("../02 - Data sets/product-sector_crosswalk.Rdata")
+product_sector.crosswalk %<>%
+  filter(!duplicated(hs, cnae, w1, w2, manual.imput)) %>% 
+  select(hs, cnae, manual.imput, w1, w2) %>% 
+  rename(product_id = hs,
+         sector_id = cnae, 
+         manual_implementation = manual.imput) %>% 
+  mutate(product_id = as.numeric(product_id),
+         sector_id = as.numeric(sector_id))
+dbWriteTable(data_lake, "PRODUCT_SECTOR_CROSSWALK", product_sector.crosswalk, append=TRUE)
+```
+
+## Bank branches
+
+Estatística Bancária Mensal (ESTBAN) is a data set with information about commercial banks' balance sheet in the Brazilian Economy. ESTBAN brings monthly information at the level of bank's branches.^[https://www4.bcb.gov.br/fis/cosif/estban.asp?frame=1] This dataset is consolidated by the Brazilian Central Bank (BCB) on a monthly basis with a 90 days lag. Overall information about the dataset and its main account can be consulted in the [COSIF Manual](https://www3.bcb.gov.br/aplica/cosif/completo). This R-script will load and consolidate a subset of previously downloaded files from ESTBAN for the 1994-2018 period.^[The download was implemented in a different R-script. Details can be consulted at https://bit.ly/3cB3GF4.] This consolidation process required a selection and transformation of variables implemented by a sub-level function called *munging_estban*.^[Mode details about this function can be consulted at]. After this basic munging process, all the information will be loaded into the table **BANK_BRANCHES** inside the data lake. 
+
+**Creating table BANK_BRANCHES**
+```{sql connection=data_lake}
+create table IF NOT EXISTS BANK_BRANCHES(
+branch_id varchar(14),
+year integer, 
+month integer,
+bank_id integer,
+bank_name varchar(255),
+total_assets integer,
+total_liabilities integer,
+net_assets integer,
+net_results integer,
+short_term_deposits integer,
+long_term_deposits integer,
+interbank_deposits integer,
+total_loans integer,
+rural_loans integer,
+housing_loans integer,
+mun_id varchar(6),
+primary key (branch_id, year, month),
+foreign key (mun_id) references LOCALITIES on delete NO ACTION
+);
+```
+
+**Loading information into BANK_BRANCHES**
+```{r warning=FALSE, message=FALSE}
+estban.source <- list.files("../../../01 - datalake/ESTBAN/original files", full.names = TRUE)
+years <- as.numeric(sapply(estban.source, substr, start=46, stop=49, USE.NAMES = FALSE))
+estban.files <- estban.source[years %in% 1994:2018]
+bank_branches <- rbindlist(lapply(estban.files, munging_estban))
+dbWriteTable(data_lake, "BANK_BRANCHES", bank_branches, append=TRUE)
+```
+
+## Companies
+
+**Creating table COMPANIES**
+```{sql connection=data_lake}
+CREATE TABLE IF NOT EXISTS COMPANIES(
+company_record_id text,
+year integer,
+total_emp double,
+legal_status_1994 integer,
+legal_status integer,
+company_type integer,
+activity_index integer,
+simples_index integer,
+cei_index integer,
+mun_id VARCHAR(6),
+sector_id integer,
+PRIMARY KEY (company_record_id),
+FOREIGN KEY (mun_id) references LOCALITIES on delete NO ACTION,
+FOREIGN KEY (sector_id) references ECONOMIC_SECTORS on delete NO ACTION
+);
+```
+
+**Loading information into COMPANIES**
+```{r warning=FALSE, message=FALSE}
+# create local function to loop the input step
+load_rais_estab <- function(year){
+  # load RAIS after basic munging and adapt it to fit the design proposed for the lake
+  data_i <- munging_rais(year, type="ESTAB", registries=Inf) %>% 
+    rename(company_record_id = company.id,
+           total_emp = total.emp,
+           legal_status_1994 = legal.status.1994,
+           legal_status = legal.status.pos94,
+           company_type = type.company,
+           activity_index = ind.neg,
+           simples_index = ind.simples,
+           cei_index = ind.cei,
+           mun_id = mun.id, 
+           sector_id = cnae95) %>%
+    mutate(mun_id = as.character(mun_id)) %>% 
+    select(company_record_id, year, total_emp, legal_status, legal_status_1994, company_type, activity_index, simples_index, cei_index, mun_id, sector_id)
+  
+  # write info into data lake
+  dbWriteTable(data_lake, "COMPANIES", data_i, append=TRUE)
+  }
+
+## implementing loop to input info into data lake
+lapply(1994:2018, load_rais_estab)
+```
+
+## Employment
+
+**Creating table EMPLOYMENT**
+```{sql connection=data_lake}
+CREATE TABLE IF NOT EXISTS EMPLOYMENT(
+employment_record_id text,
+year integer,
+employment_wage_year double,
+employment_wage_dec double,
+employment_active_dec integer,
+employment_hours double,
+employment_duration double,
+employment_type integer,
+worker_age integer,
+worker_nationality integer,
+worker_education integer,
+worker_gender integer,
+company_type integer,
+company_legal_status_1994 integer,
+company_legal_status integer,
+mun_id varchar(6),
+sector_id integer,
+PRIMARY KEY (employment_record_id),
+FOREIGN KEY (mun_id) references LOCALITIES on delete NO ACTION,
+FOREIGN KEY (sector_id) references ECONOMIC_SECTORS on delete NO ACTION
+);
+```
+
+**Loading information into EMPLOYMENT**
+```{r warning=FALSE, message=FALSE}
+# create local function to loop the input step
+load_rais_vinc <- function(year){
+  # load RAIS after basic munging and adapt it to fit the design proposed for the lake
+  data_i <- munging_rais(year, type="VINC", registries=Inf) %>%
+    filter(wage.year>0) %>% 
+    rename(employment_record_id = employment.id,
+           employment_wage_year = wage.year,
+           employment_wage_dec = wage.dec,
+           employment_active_dec = active.contract,
+           employment_hours = hours.hired,
+           employment_duration = time.employment,
+           employment_type = type.contract,
+           worker_age = worker.age,
+           worker_nationality = worker.nationality,
+           worker_education = worker.education,
+           worker_gender = worker.gender,
+           company_type = type.company,
+           company_legal_status_1994 = legal.status.1994,
+           company_legal_status = legal.status.pos1994,
+           mun_id = mun.id, 
+           sector_id = cnae95) %>%
+    mutate(mun_id = as.character(mun_id)) %>% 
+    select(employment_record_id, year, employment_wage_year, employment_wage_dec, employment_active_dec, employment_hours, employment_duration, employment_type, worker_age, worker_nationality, worker_education, worker_gender, company_type, company_legal_status_1994, company_legal_status, mun_id, sector_id)
+  
+  # write info into data lake
+  dbWriteTable(data_lake, "EMPLOYMENT", data_i, append=TRUE)
+  }
+
+## implementing loop to input info into data lake
+lapply(1994:2018, load_rais_vinc)
+```
+# Closing connection with the Data Lake
+
+```{r warning=FALSE, message=FALSE}
+dbDisconnect(data_lake)
+```
+
+This R-script was fully executed at `r Sys.time()`.
+
+# References
