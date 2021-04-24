@@ -1,5 +1,9 @@
 load_estab <-
-function(year, main.source, n.registries){
+function(year, main.source, n.registries=10, output="db.table", connection, table){
+
+  if(!output %in% c("db.table", "Rdata")){
+    stop("Please review the function call. The argument output can only assume two values: db.table or Rdata")
+    }
   
   year.source <- paste0(main.source, "/", year, ".zip")
   temp.folder <- paste0(getwd(), "/temp")
@@ -23,10 +27,39 @@ function(year, main.source, n.registries){
     file.i <- list.files(using.folder, full.names=TRUE)[1]
   }
   
+  # determining sectorial classification
+  sector.class <- ifelse(year<=2001, "cnae", "cnae10")
+  
   # loading into R
-  data.estab <- fread(file=file.i, nrows=n.registries)
+  data.i<- fread(file=file.i, nrows=n.registries)
+  data.i <- munging_rais(data.i, year, "ESTAB") %>% 
+    rename(total_emp = total.emp,
+           legal_status_1994 = legal.status.1994,
+           legal_status = legal.status.pos94,
+           company_type = type.company,
+           activity_index = ind.neg,
+           simples_index = ind.simples,
+           cei_index = ind.cei,
+           mun_id = mun.id, 
+           rais_sector_id = cnae95) %>%
+    mutate(mun_id = as.character(mun_id),
+           rais_sector_classification = sector.class) %>% 
+    select(year, total_emp, legal_status, legal_status_1994, company_type, activity_index, simples_index, cei_index, mun_id, rais_sector_id, rais_sector_classification)
+  data.i$company_record_id  <- paste("c", year, 1:nrow(data.i), sep="-")
+  data.i <- relocate(data.i, company_record_id)
+
   # cleaning using folder (it always has only one file)
   unlink(file.i, recursive = FALSE)
   unlink(temp.folder, recursive = TRUE)
-  data.estab
+
+ # write info into data lake
+  if(output=="db.table"){
+    dbWriteTable(connection, table, data.i, append=TRUE)
+    output <- paste("RAIS Company files for year ", year, " were inserted into table ", table)
+    }else{
+      output <- data.i
+    }
+    rm(data.i)
+    gc(reset=TRUE)
+    output
 }

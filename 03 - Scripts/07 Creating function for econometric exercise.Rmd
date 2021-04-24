@@ -1,0 +1,55 @@
+---
+title: "Creating function for econometric exercise"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: paper
+    number_sections: false
+bibliography: references.bib
+---
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(magrittr)){install.packages("magrittr")}
+if(!require(stargazer)){install.packages("stargazer")}
+if(!require(AER)){install.packages("AER")}
+if(!require(multiwayvcov)){install.packages("multiwayvcov")}
+```
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+load("../02 - Data sets/working_data.Rdata")
+
+implement_reg <- function(wd=working.data, y.var){
+  
+  reg_year <- function(wd=wd, t){
+    
+    wd.i <- wd %>%
+      filter(year %in% c(1995, 1999, 2000, 2008, t)) %>% 
+      group_by(sector_id, year) %>%
+      mutate(s_emp = sum(s_m_emp),
+             s_yearly_wage = sum(s_m_yearly_wage),
+             s_dec_wage = sum(s_m_dec_wage)) %>% 
+      ungroup() %>%
+      mutate(share_s_emp = s_m_emp/s_emp,
+             share_s_yearly_wage = s_m_yearly_wage/s_yearly_wage,
+             share_s_dec_wage = s_m_dec_wage/s_dec_wage)
+      group_by(mca_id,.drop = TRUE) %>% 
+      
+      
+      
+    
+    share.data <- wd %>% 
+      filter(year==2000) %>% 
+      group_by(mca_id) %>%
+      summarise(mca_emp = sum(s_m_emp),
+                mca_share = sum(s_m_emp[year==2000]/mca_emp))
+      
+      summarise()
+    
+  }
+  
+}
+
+
+```

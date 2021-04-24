@@ -6,6 +6,7 @@ output:
   html_document:
     theme: united
     number_sections: false
+bibliography: references.bib
 ---
 
 ```{r, warning=FALSE, message=FALSE}
@@ -40,7 +41,8 @@ ibge.conversor %<>%
   filter(!duplicated(.)) %>% 
   mutate(ncm = str_pad(ncm, 8, "left", pad="0"),
          hs = substr(ncm, 1, 6),
-         cnae = gsub("[:.:]", "", cnae)) %>% 
+         cnae = gsub("[:.:]", "", cnae),
+         cnae = gsub("-", "", cnae)) %>% 
   relocate(hs, .after=ncm)
 ```
 
@@ -202,7 +204,8 @@ product_sector.crosswalk <- ibge.conversor %>%
   mutate(n.cnaes = n_distinct(cnae),
          value.hs = sum(value.ncm),
          w.ncm = value.ncm/value.hs,
-         max.w.ncm = max(w.ncm)) %>% 
+         max.w.ncm = max(w.ncm),
+         manual.implemented = max(manual.imput)) %>% 
   ungroup() %>% 
   mutate(w1 = case_when(n.cnaes==1 ~ 1,
                         n.cnaes>1 & value.hs>0 & w.ncm==max.w.ncm ~ 1,
@@ -211,7 +214,8 @@ product_sector.crosswalk <- ibge.conversor %>%
          w2 = case_when(n.cnaes==1 ~ 1,
                         n.cnaes>1 & value.hs> 0 ~ w.ncm,
                         TRUE ~ NaN)) %>% 
-  select(ncm, hs, cnae, w1, w2, ncm.description, cnae.description, n.cnaes, manual.imput)
+  select(ncm, hs, cnae, w1, w2, ncm.description, cnae.description, n.cnaes, manual.implemented) %>% 
+  filter(!duplicated(select(.,hs, cnae, w1, w2))) 
 ```
 
 The HS classification is more aggregated than the NCM. Thus, working at the HS 6-digits level implies more cases of multiple associations (Table 2). Still, `r format(table2$Freq.share[1], digits=4, nsmall=2)`% of the HS codes were associated with a single CNAE, while the remaining `r format(100-as.numeric(table2$Freq.share[1]), digits=4, nsmall=2)`% had multiple associations -- some had even 5 different CNAEs. To help dealing with those cases, two strategies will be implemented. Both will use detailed information about Brazilian trade flows made available by the [Comex Stat](http://comexstat.mdic.gov.br/pt/home) for the years of 1997-1999. These flows are reported at the NCM level, and thus they have no ambiguity after the adjustments made in the previous two sections. The first strategy will then follow three steps: *i)* we will link each HS code to its respective NCM codes; *ii)* using data from [Comex Stat](http://comexstat.mdic.gov.br/pt/home), we will discover the most relevant (in terms of traded values) NCM code for each HS code; *iii)* finally, we will attribute the entire HS flow to the CNAE linked to its most relevant NCM (according to 1997-1999 trade volume). Alternatively, the second approach will divide the HS flow through multiple CNAEs, following weights defined according to their relative NCM trade volumes. After these procedures, the IBGE converter becomes a crosswalk that allows us to move from HS-1996 to CNAE-1995. 
@@ -225,7 +229,37 @@ kbl(table2,
   footnote(general = "IBGE", general_title = "Source:", footnote_as_chunk = T)
 ```
 
+# Including HS-1996 not reported in IBGE Conversor
+
+There are also some cases of HS-1996 codes that are reported in the UNComtrade data base but are not listed in the IBGE converter. Considering the period covered in @grimaldi2021, there are a total of 28 of these cases. In the year of 2018, these cases represented less than 0.01% of the total Brazilian imports from China. Still, to avoid having unclassified cases in the analysis, we will also manually attributed this 28 cases to specific CNAE sectors following description similarities. Table 3 list these cases, as well as their CNAE codes (manually attributed) and their product and sectorial descriptions. After this procedure, only two HS codes that are associated with non specified commodities will remain without a CNAE attribution.
+
 ```{r, echo=TRUE, warning=FALSE, message=FALSE}
+manual.hs.imputation <- read.csv("../02 - Data sets/manual_imputation_hs_cnaes.csv") %>%
+  rename(product.description=hs.description) %>% 
+  mutate(ncm=NA,
+         w1=1,
+         w2=1,
+         n.cnaes=1,
+         manual.implemented=1,
+         hs=str_pad(hs, 6, "left", "0"),
+         cnae=str_pad(cnae, 5, "left", "0")) %>% 
+  as.data.frame()
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='asis'}
+kbl(select(manual.hs.imputation, hs, cnae, product.description, cnae.description),
+    align=c("l", "l", "l"),
+    caption="Table 3: HS codes without correspondence in IBGE converter", booktabs = TRUE,
+    col.names=c("HS code", "CNAE code (attributed)", "Product description", "CNAE description")) %>%
+  kable_styling() %>% 
+  footnote(general = "IBGE and UNComtrade", general_title = "Source:", footnote_as_chunk = T)
+```
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+product_sector.crosswalk %<>%
+  rename(product.description=ncm.description) %>% 
+  rbind.data.frame(manual.hs.imputation)
+
 save(product_sector.crosswalk, file="../02 - Data sets/product-sector_crosswalk.Rdata")
 ``` 
 

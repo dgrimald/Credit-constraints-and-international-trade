@@ -1,0 +1,126 @@
+---
+title: "Creating the sectorial crosswalk file (Original RAIS sector codes to standardized economic sectors)"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: united
+    number_sections: false
+bibliography: references.bib
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(knitr)
+if(!require(kableExtra)){install.packages("kableExtra")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(magrittr)){install.packages("magrittr")}
+if(!require(readxl)){install.packages("readxl")}
+if(!require(data.table)){install.packages("data.table")}
+source("munging_rais.R", encoding = "Windows-1252")
+source("load_estab.R")
+```
+
+# Introduction
+
+In the RAIS raw files, information on sectorial classification reported in the CNAE-1995 field pertains to two different classification. Until 2001, codes are reported according to CNAE-1995. From 2002 onward, codes are reported according to a revised version of CNAE-1995 (called CNAE 1.0). There are some relevant changes between these two systems. CNAE 1.0 has a lager number of sectors -- that is, it brings a more disaggregated view of the economy. In order to keep time-comparability while minimizing the number of multiple associations (cases when 1 code from one system has to be splitted among distinct codes in the other system), this script will build a crosswalk file allowing researchers to move from CNAE 1.0 to CNAE. This crosswalk used information from IBGE with only smaller adaptions^[Information about CNAE-CNAE 1.0 compatibility can be obtained at https://concla.ibge.gov.br/images/concla/documentacao/CNAE1.0xCNAE.pdf]. This information wwas used to manually implement a series of associations between CNAE 1.0 codes and CNAE codes^[The file that consolidates this series of associations can be consulted at [manual_imputation_cnae10_cnae.csv]( https://exchangelabsgmu-my.sharepoint.com/:x:/g/personal/dgrimald_masonlive_gmu_edu/EYmKW3ufFbpMqqXQxydE_VgBl7M97fFv2u7rvIoxqCy1tg?e=fwa309).] 
+
+After that, the main challenge was to build a splitting rule for the cases with multiple associations. To avoid inconsistencies that could jeopardize the causal identification desgined in @grimaldi2021, this code will use the average economic structure between years 1999-2001 (the last three before the adoption of CNAE 1.0 by RAIS) to build two different splitting rules. We will use an example to explain these rules. Consider that sector $X$ in CNAE 1.0 is associated with sectors $X1$ and $X2$ in CNAE. Also, by analyzing data from RAIS raw files from years 1999-2001, assume that $X1$ employees on average 60 workers per year, while $X2$ is associated with 40 workers per year. The first splitting rule will direct $X$ employees, as reported from 2002 onward, integrally to sector $X1$ because it is the main CNAE sector associated with sector $X$. Considering the same example, the second rule will divide the total amount of employees reported to sector $X$ in the following manner: 60% to $X1$ and 40% to $X2$.
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+# downloading file with CNAE information from IBGE
+temp <- tempfile(fileext = ".xls")
+download.file(url="https://cnae.ibge.gov.br/images/concla/downloads/CNAE.xls",
+              destfile = temp,
+              method="wininet",
+              mode="wb")
+
+# munging data on CNAE sectors
+cnae.sectors<- read_excel(temp, skip=5)
+cnae.sectors <- cnae.sectors[,c(4:5)]
+names(cnae.sectors) <- c("cnae_id", "cnae_description")
+cnae.sectors %<>%
+  mutate(cnae_id = gsub("[:.:]", "", cnae_id),
+         cnae_id = as.numeric(gsub("-", "", cnae_id)),
+         cnae_version = "cnae") %>%
+  select(cnae_id, cnae_description, cnae_version) %>% 
+  na.omit() %>% 
+  as.data.frame()
+
+# downloading file with CNAE v1.0 information from IBGE
+temp <- tempfile(fileext = ".xls")
+download.file(url="https://cnae.ibge.gov.br/images/concla/downloads/CNAE1.0.xls",
+              destfile = temp,
+              method="wininet",
+              mode="wb")
+
+# munging data on CNAE sectors
+cnae10.sectors<- read_excel(temp, skip=5)
+cnae10.sectors <- cnae10.sectors[,c(4:5)]
+names(cnae10.sectors) <- c("cnae_id", "cnae_description")
+cnae10.sectors %<>%
+  mutate(cnae_id = gsub("[:.:]", "", cnae_id),
+         cnae_id = as.numeric(gsub("-", "", cnae_id)),
+         cnae_version = "cnae10") %>%
+  select(cnae_id, cnae_description, cnae_version) %>% 
+  na.omit() %>% 
+  as.data.frame()
+
+# loading manually imputed relations to change CNAE 1.0 into CNAE (now called sector_id)
+cnaes.relations <- read.csv("../02 - Data sets/manual_imputation_cnae10_cnae.csv", encoding = "UTF-8")
+cnaes.relations <- cnaes.relations[,c(1,2)]
+names(cnaes.relations) <- c("cnae10_id", "cnae_id")
+
+# loading RAIS Company files for the 1999-2001 period
+rais.data <- rbindlist(lapply(c(1999, 2000, 2001),
+                              load_estab,
+                              main.source = "C:/Users/danie/OneDrive - George Mason University/01 - datalake/RAIS/RAIS - LAI",
+                              output="Rdata",
+                              n.registries=Inf))
+
+rais.data %<>%
+  select(sector_rais_id, total_emp) %>% 
+  group_by(sector_rais_id) %>% 
+  summarise(total_emp_cnae = sum(total_emp))
+
+# calculating the weights (considering relative employment importance between 1999-2001 years) for each CNAE1.0 - CNAE relation
+crosswalk1 <- cnaes.relations %>% 
+  left_join(rais.data, by=c("cnae_id"="sector_rais_id")) %>% 
+  group_by(cnae10_id) %>%
+  mutate(cnae_version="cnae10",
+         n.cnaes = n_distinct(cnae_id),
+         total_emp_cnae10 = sum(total_emp_cnae, na.rm = TRUE),
+         max_emp_cnae = max(total_emp_cnae, na.rm=TRUE),
+         v1 = case_when(n.cnaes==1 ~ 1,
+                        n.cnaes>1 & is.na(total_emp_cnae) ~ 0,
+                        TRUE ~ as.numeric(total_emp_cnae==max_emp_cnae)),
+         v2 = case_when(n.cnaes==1 ~ 1,
+                        n.cnaes>1 & is.na(total_emp_cnae) ~ 0,
+                        TRUE ~ total_emp_cnae/total_emp_cnae10)) %>% 
+  ungroup() %>% 
+  select(cnae10_id, cnae_version, cnae_id, v1, v2) %>% 
+  rename(rais_sector = cnae10_id,
+         sector_id = cnae_id)
+
+# The weights for the CNAE - CNAE crosswalk are all equal to 1
+crosswalk2 <- cnae.sectors %>% 
+  mutate(cnae_version="cnae",
+         sector_id=cnae_id,
+         v1=1,
+         v2=1) %>%
+  rename(rais_sector = cnae_id) %>% 
+  select(rais_sector, cnae_version, sector_id, v1, v2)
+
+# consolidating the crosswalk
+rais_standard.crosswalk <- rbind(crosswalk1, crosswalk2)
+
+# saving the crosswalk
+save(rais_standard.crosswalk, file="../02 - Data sets/rais-standard_crosswalk.Rdata")
+```
+
+
+
+
+
+
+
+

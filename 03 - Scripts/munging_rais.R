@@ -1,13 +1,5 @@
 munging_rais <-
-function(year, type, registries=100){
-  
-  # setting the folder where all information from original RAIS files are stored
-  main.source <- "C:/Users/danie/OneDrive - George Mason University/01 - datalake/RAIS/RAIS - LAI"
-  
-  # checking consistency for year argument
-  if(!year %in% c(1994:2018)){
-    stop("Please select a valid year to load RAIS data (from 1994 to 2018). The layout of the year you requested has not been incorporated to the routine yet.")
-  }
+function(rais.data, year, type){
   
   # checking consistency for type argument
   not.valid <- case_when(type=="ESTAB" ~ 0,
@@ -61,7 +53,7 @@ function(year, type, registries=100){
     names(list.names.input) <- 1994:2018
     
     # load raw data
-    data.i <- load_estab(year=year, main.source=main.source, n.registries=registries)
+    data.i <- rais.data
     
     # the raw data brings two different fields called "Tipo Estab". We will keep only the first one
     if(year %in% c(2002:2018)){data.i <- data.i[,-grep(TRUE, names(data.i) %in% "Tipo Estab")[2], with=FALSE]}
@@ -82,22 +74,10 @@ function(year, type, registries=100){
       data
     }
     data.i <- set.standard(data=data.i, vars=unique(unlist(list.names.input)))
-    data.i$company.id <- paste("c", data.i$year, 1:nrow(data.i), sep="-") 
-    data.i <- relocate(data.i, company.id)
   }
   
   if(type=="VINC"){
     source("load_vinc.R")
-    
-    # # bring information on price indexes from IpeaData
-    # # Source: http://ipeadata.gov.br/beta3/#/dados-serie?anomapa=&ascOrder=&base=macro&busca=ipca&columnOrdering=&end=2020&fonte=&serid=PRECOS_IPCAG&skip=0&start=1980&tema=&territoriality=
-    # 
-    # ipca <- read.csv("../02 - Data sets/PRECOS_IPCAG.csv") %>%
-    #   rename(year=ANO,
-    #          ipca=VALVALOR) %>% 
-    #   filter(year %in% 1994:2018) %>% 
-    #   mutate(ipca.shift=ifelse(year==1994, 1, 1+ipca/100),
-    #          icpa.index=ifelse(year==1994, 1, 1*cumprod(ipca.shift)))
     
     # define variable to keep
     old.names <- function(year){
@@ -128,7 +108,7 @@ function(year, type, registries=100){
     names(list.names.input) <- 1994:2018
     
     # load raw data
-    data.i <- load_vinc(year=year, main.source=main.source, n.registries=registries)
+    data.i <- rais.data
     
     # the raw data brings two different fields called "Tipo Estab". We will keep only the first one
     data.i <- data.i[,-grep(TRUE, names(data.i) %in% "Tipo Estab")[2], with=FALSE]
@@ -175,8 +155,6 @@ function(year, type, registries=100){
       data
     }
     data.i <- set.standard(data=data.i, vars=unique(unlist(list.names.input)), t=year)
-    data.i$employment.id <- paste("e", data.i$year, 1:nrow(data.i), sep="-") 
-    data.i <- relocate(data.i, employment.id)
   }
   data.i
 }
