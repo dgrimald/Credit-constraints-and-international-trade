@@ -1,0 +1,280 @@
+---
+title: "Extracting Working data from data lake"
+author: "Daniel Grimaldi / Schar School of Public Policy"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    theme: paper
+    number_sections: false
+bibliography: references.bib
+---
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+if(!require(DBI)){install.packages("DBI")}
+if(!require(odbc)){install.packages("odbc")}
+if(!require(RSQLite)){install.packages("RSQLite")}
+if(!require(glue)){install.packages("glue")}
+if(!require(tidyverse)){install.packages("tidyverse")}
+if(!require(magrittr)){install.packages("magrittr")}
+source("../../../02 - general scripts/themes_dgrimald.R")
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+data_lake <- dbConnect(RSQLite::SQLite(),
+                       dbname="../02 - Data sets/rp2.db")
+```
+
+# Tables stored in the data lake
+
+```{sql connection=data_lake}
+SELECT name
+FROM sqlite_master 
+WHERE type ='table'
+AND name NOT LIKE 'sqlite_%';
+```
+
+# Extracting employment level at sectorial-locality level
+
+```{sql connection=data_lake, output.var="wage.data"}
+SELECT year, sector_id, mca_id, SUM(employment_wage_year*v2) AS s_m_yearly_wage, SUM(employment_wage_dec*v2) AS s_m_dec_wage
+FROM LOCALITIES NATURAL JOIN EMPLOYMENT NATURAL JOIN RAIS_STANDARD_CROSSWALK
+WHERE year IN (1995, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018)
+GROUP BY year, sector_id, mca_id
+```
+
+```{sql connection=data_lake, output.var="emp.data"}
+SELECT year, sector_id, mca_id, SUM(total_emp*v2) AS s_m_emp, COUNT(DISTINCT company_record_id)*v2 as s_m_companies
+FROM LOCALITIES NATURAL JOIN COMPANIES NATURAL JOIN RAIS_STANDARD_CROSSWALK
+WHERE year IN (1995, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018)
+GROUP BY year, sector_id, mca_id
+```
+
+```{r}
+wage.data %<>%
+  filter(!is.na(sector_id))
+
+emp.data %<>%
+  filter(!is.na(sector_id)) %>% 
+  full_join(wage.data, by=c("year", "sector_id", "mca_id")) %>% 
+  mutate(s_m_emp = replace_na(s_m_emp, 0),
+         s_m_companies = replace_na(s_m_companies, 0),
+         s_m_yearly_wage = replace_na(s_m_yearly_wage, 0),
+         s_m_dec_wage = replace_na(s_m_dec_wage, 0))
+
+save(emp.data, file="../02 - Data sets/emp_data.Rdata")
+rm(wage.data)
+gc(reset=TRUE)
+```
+
+# Extracting trade volumes at the sectorial level
+
+```{sql connection=data_lake, output.var="br.trade"}
+SELECT year, sector_id, sum(trade_value*w1) AS imports_br_w1, sum(trade_value*w2) AS imports_br_w2 
+FROM TRADE_FLOWS NATURAL JOIN PRODUCT_SECTOR_CROSSWALK
+WHERE TRADE_FLOWS.reporter_id=76
+AND TRADE_FLOWS.partner_id=156
+AND TRADE_FLOWS.flow_type='Import'
+AND TRADE_FLOWS.year > 1998
+GROUP BY year, sector_id
+```
+
+```{sql connection=data_lake, output.var="mercosur.trade"}
+SELECT year, sector_id, sum(trade_value*w2) AS imports_mercosur_w1, sum(trade_value*w2) AS imports_mercosur_w2 
+FROM TRADE_FLOWS NATURAL JOIN PRODUCT_SECTOR_CROSSWALK
+WHERE TRADE_FLOWS.reporter_id IN (32, 600, 858)
+AND TRADE_FLOWS.partner_id=156
+AND TRADE_FLOWS.flow_type='Import'
+AND TRADE_FLOWS.year > 1998
+GROUP BY year, sector_id
+```
+
+```{r}
+trade.data <- full_join(br.trade, mercosur.trade, by=c("year", "sector_id")) %>% 
+  mutate_at(vars(starts_with("imports")), ~ replace_na(., 0))
+
+save(trade.data, file="../02 - Data sets/trade_data.RData")
+rm(uncomtrade, br.trade, mercosur.trade)
+gc(reset=TRUE)
+```
+
+# Extracting banking information at the locality level
+
+```{sql connection=data_lake, output.var="bank.data"}
+SELECT year, mca_id, bank_id, COUNT(DISTINCT branch_id) AS n_branches, SUM(housing_loans + rural_loans + other_loans) AS total_loans, SUM(other_loans) AS other_loans, SUM(short_term_deposits+long_term_deposits+interbank_deposits) AS deposits
+FROM LOCALITIES NATURAL JOIN BANK_BRANCHES
+WHERE year IN (1995, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018)
+GROUP BY year, mca_id, bank_id
+```
+
+```{sql connection=data_lake, output.var="itau.id"}
+SELECT DISTINCT bank_id, bank_name
+FROM BANK_BRANCHES
+WHERE bank_name IN ('BANCO ITAÚ CONSIGNADO S.A.', 'BCO ITAÚ-BBA S.A.', 'BCO ITAÚ BBA S.A.', 'BCO ITAUBANK S.A.', 'ITAÚ UNIBANCO S.A.', 'ITAÚ UNIBANCO HOLDING S.A.', 'BCO BANESTADO S.A.', 'BCO BEG S A')
+```
+
+```{sql connection=data_lake, output.var="unibanco.id"}
+SELECT DISTINCT bank_id, bank_name
+FROM BANK_BRANCHES
+WHERE bank_name IN ('BANCO INVESTCRED UNIBANCO S.A.', 'UNIBANCO-UNIAO BCOS BRAS S.A.')
+```
+
+```{r}
+# to calculate the HHI, we will combine all different banks owned by Itau in 2008 into the bank_id associated with the holding. We will do the same thing for Unibanco:
+## itau (holding) bank_id=60872504
+## BEG was purchased by Itau in 2001 (december)
+## Banestado was purchased by Itau in 2000 (october)
+## Unibanco (holding) bank_id=33700394
+itau2000 <- itau.id$bank_id[!itau.id$bank_name %in% c('BCO BANESTADO S.A.', 'BCO BEG S A')]
+itau2001 <- itau.id$bank_id[!itau.id$bank_name %in% c('BCO BEG S A')]
+itau2002 <- itau.id$bank_id
+unibanco <- unibanco.id$bank_id
+itau_unibanco <- c(itau.id$bank_id, unibanco.id$bank_id)
+
+# creating LIM variable
+LIM.data <- bank.data %>% 
+  filter(year==2008) %>%
+  mutate(bank_id = as.double(bank_id),
+         bank_id = case_when(bank_id %in% itau_unibanco ~ 60872504,
+                             TRUE ~ bank_id)) %>%
+  group_by(year, mca_id, bank_id) %>%
+  summarise_all(sum) %>%
+  ungroup() %>% 
+  group_by(year, mca_id) %>% 
+  mutate(mca_loans=sum(total_loans),
+         mca_other_loans=sum(other_loans),
+         mca_deposits=sum(deposits),
+         mca_banks=n_distinct(bank_id),
+         mca_branches=sum(n_branches)) %>%
+  ungroup() %>% 
+  mutate(s_loans=total_loans/mca_loans,
+         s_other_loans=other_loans/mca_other_loans,
+         s_deposits=deposits/mca_deposits) %>%
+  group_by(mca_id, .drop=TRUE) %>% 
+  summarise(n_banks = first(mca_banks),
+            total_loans = first(mca_loans),
+            other_loans = first(mca_other_loans),
+            deposits = first(mca_deposits),
+            ihh_loans = sum(s_loans^2),
+            ihh_other_loans = sum(s_other_loans^2),
+            ihh_deposits = sum(s_deposits^2),
+            ihhN_loans = case_when(n_banks==1 ~ 1,
+                                   TRUE ~ (ihh_loans-1/n_banks)/(1-1/n_banks)),
+            ihhN_other_loans = case_when(n_banks==1 ~ 1,
+                                         TRUE ~ (ihh_other_loans-1/n_banks)/(1-1/n_banks)),
+            ihhN_deposits = case_when(n_banks==1 ~ 1,
+                                      TRUE ~ (ihh_deposits-1/n_banks)/(1-1/n_banks))) %>% 
+  select(mca_id, ihh_loans, ihh_other_loans, ihh_deposits, ihhN_loans, ihhN_other_loans, ihhN_deposits) %>% 
+  rename(LIM_loans = ihh_loans,
+         LIM_other_loans = ihh_other_loans,
+         LIM_deposits = ihh_deposits,
+         LIMn_loans = ihhN_loans,
+         LIMn_other_loans = ihhN_other_loans,
+         LIMn_deposits = ihhN_deposits) %>% 
+  as.data.frame()
+  
+bank.data  %<>%
+  mutate(bank_id = as.double(bank_id),
+         bank_id = case_when(year<=2000 & bank_id %in% itau2000 ~ 60872504,
+                             year==2001 & bank_id %in% itau2001 ~ 60872504,
+                             year %in% 2002:2008 & bank_id %in% itau2002 ~ 60872504,
+                             year<=2008 & bank_id %in% unibanco ~ 33700394,
+                             year>2008 & bank_id %in% itau_unibanco ~ 60872504,
+                             TRUE ~ bank_id)) %>% 
+  group_by(year, mca_id, bank_id) %>%
+  summarise_all(sum) %>%
+  ungroup() %>% 
+  group_by(year, mca_id) %>% 
+  mutate(mca_loans=sum(total_loans),
+         mca_other_loans=sum(other_loans),
+         mca_deposits=sum(deposits),
+         mca_banks=n_distinct(bank_id),
+         mca_branches=sum(n_branches)) %>%
+  ungroup() %>% 
+  mutate(s_loans=total_loans/mca_loans,
+         s_other_loans=other_loans/mca_other_loans,
+         s_deposits=deposits/mca_deposits) %>%
+  group_by(mca_id) %>%
+  mutate(itau = sum(bank_id[year==2008] %in% 60872504),
+         unibanco = sum(bank_id[year==2008] %in% 33700394),
+         treated = itau * unibanco,
+         partial.control = as.numeric(itau + unibanco == 1)) %>%
+  ungroup() %>% 
+  group_by(year, mca_id, .drop=TRUE) %>% 
+  summarise(n_banks = first(mca_banks),
+            n_branches = first(mca_branches),
+            total_loans = first(mca_loans),
+            other_loans = first(mca_other_loans),
+            deposits = first(mca_deposits),
+            ihh_loans = sum(s_loans^2),
+            ihh_other_loans = sum(s_other_loans^2),
+            ihh_deposits = sum(s_deposits^2),
+            ihhN_loans = case_when(n_banks==1 ~ 1,
+                                   TRUE ~ (ihh_loans-1/n_banks)/(1-1/n_banks)),
+            ihhN_other_loans = case_when(n_banks==1 ~ 1,
+                                         TRUE ~ (ihh_other_loans-1/n_banks)/(1-1/n_banks)),
+            ihhN_deposits = case_when(n_banks==1 ~ 1,
+                                      TRUE ~ (ihh_deposits-1/n_banks)/(1-1/n_banks)),
+            itau = first(itau),
+            unibanco = first(unibanco),
+            treated = first(treated),
+            partial.control = first(partial.control)) %>% 
+  as.data.frame()
+
+save(bank.data, file="../02 - Data sets/bank_data.Rdata")
+
+lim.data <- bank.data %>% 
+  filter(year==2018)
+
+```
+
+# Consolidating a regression data set
+
+```{r, eval=TRUE}
+working.data <- emp.data %>% 
+  left_join(bank.data, by=c("mca_id", "year")) %>% 
+  left_join(trade.data, by=c("sector_id", "year")) %>%
+  left_join(LIM.data, by="mca_id") %>% 
+  mutate_at(vars(!starts_with(c("ihh", "LIM"))), ~ replace_na(., 0))
+
+save(working.data, file="../02 - Data sets/working_data.Rdata")
+```
+
+# Overview for data set
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+load("../02 - Data sets/working_data.Rdata")
+head(working.data)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+year.data <- working.data %>% 
+  group_by(year) %>% 
+  summarise(total.emp =sum(s_m_emp)/1000000,
+            total.companies = sum(s_m_companies)/1000000)
+
+graph1 <- ggplot(data=year.data, aes(x=year, y=total.emp))+
+  geom_line(color=cores$azulescuro, size=1.1) +
+  labs(x="Years",
+       y="Number of employees (Millions)") +
+  tema_base_fundobranco()
+
+graph1
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+graph2 <- ggplot(data=year.data, aes(x=year, y=total.companies))+
+  geom_line(color=cores$azulescuro, size=1.1) +
+  labs(x="Years",
+       y="Number of Companies") +
+  tema_base_fundobranco()
+
+graph2
+```
+
+# Closing connection with the Data Lake
+
+```{r warning=FALSE, message=FALSE}
+dbDisconnect(data_lake)
+```
+
+This R-Script was fully executed at `r Sys.time()`.
