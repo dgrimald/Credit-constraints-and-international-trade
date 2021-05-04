@@ -1,5 +1,5 @@
 ---
-title: "Extracting Working data from data lake"
+title: "Extracting Working data from data lake: microregion"
 author: "Daniel Grimaldi / Schar School of Public Policy"
 date: "`r Sys.time()`"
 output:
@@ -16,6 +16,8 @@ if(!require(RSQLite)){install.packages("RSQLite")}
 if(!require(glue)){install.packages("glue")}
 if(!require(tidyverse)){install.packages("tidyverse")}
 if(!require(magrittr)){install.packages("magrittr")}
+if(!require(readr)){install.packages("readr")}
+
 source("../../../02 - general scripts/themes_dgrimald.R")
 ```
 
@@ -36,17 +38,21 @@ AND name NOT LIKE 'sqlite_%';
 # Extracting employment level at sectorial-locality level
 
 ```{sql connection=data_lake, output.var="wage.data"}
-SELECT year, sector_id, mca_id, SUM(employment_wage_year*v2) AS s_m_yearly_wage, SUM(employment_wage_dec*v2) AS s_m_dec_wage
+SELECT year, sector_id, microregion_id, SUM(employment_wage_year*v2) AS s_m_yearly_wage, SUM(employment_wage_dec*v2) AS s_m_dec_wage
 FROM LOCALITIES NATURAL JOIN EMPLOYMENT NATURAL JOIN RAIS_STANDARD_CROSSWALK
 WHERE year IN (1995, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018)
-GROUP BY year, sector_id, mca_id
+AND sector_id > 15000
+AND sector_id < 38000
+GROUP BY year, sector_id, microregion_id
 ```
 
 ```{sql connection=data_lake, output.var="emp.data"}
-SELECT year, sector_id, mca_id, SUM(total_emp*v2) AS s_m_emp, COUNT(DISTINCT company_record_id)*v2 as s_m_companies
+SELECT year, sector_id, microregion_id, SUM(total_emp*v2) AS s_m_emp, COUNT(DISTINCT company_record_id)*v2 as s_m_companies
 FROM LOCALITIES NATURAL JOIN COMPANIES NATURAL JOIN RAIS_STANDARD_CROSSWALK
 WHERE year IN (1995, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018)
-GROUP BY year, sector_id, mca_id
+AND sector_id > 15000
+AND sector_id < 38000
+GROUP BY year, sector_id, microregion_id
 ```
 
 ```{r}
@@ -55,13 +61,12 @@ wage.data %<>%
 
 emp.data %<>%
   filter(!is.na(sector_id)) %>% 
-  full_join(wage.data, by=c("year", "sector_id", "mca_id")) %>% 
+  full_join(wage.data, by=c("year", "sector_id", "microregion_id")) %>% 
   mutate(s_m_emp = replace_na(s_m_emp, 0),
          s_m_companies = replace_na(s_m_companies, 0),
          s_m_yearly_wage = replace_na(s_m_yearly_wage, 0),
          s_m_dec_wage = replace_na(s_m_dec_wage, 0))
 
-save(emp.data, file="../02 - Data sets/emp_data.Rdata")
 rm(wage.data)
 gc(reset=TRUE)
 ```
@@ -92,7 +97,6 @@ GROUP BY year, sector_id
 trade.data <- full_join(br.trade, mercosur.trade, by=c("year", "sector_id")) %>% 
   mutate_at(vars(starts_with("imports")), ~ replace_na(., 0))
 
-save(trade.data, file="../02 - Data sets/trade_data.RData")
 rm(uncomtrade, br.trade, mercosur.trade)
 gc(reset=TRUE)
 ```
@@ -100,10 +104,10 @@ gc(reset=TRUE)
 # Extracting banking information at the locality level
 
 ```{sql connection=data_lake, output.var="bank.data"}
-SELECT year, mca_id, bank_id, COUNT(DISTINCT branch_id) AS n_branches, SUM(housing_loans + rural_loans + other_loans) AS total_loans, SUM(other_loans) AS other_loans, SUM(short_term_deposits+long_term_deposits+interbank_deposits) AS deposits
+SELECT year, microregion_id, bank_id, COUNT(DISTINCT branch_id) AS n_branches, SUM(housing_loans + rural_loans + other_loans) AS total_loans, SUM(other_loans) AS other_loans, SUM(short_term_deposits+long_term_deposits+interbank_deposits) AS deposits
 FROM LOCALITIES NATURAL JOIN BANK_BRANCHES
 WHERE year IN (1995, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018)
-GROUP BY year, mca_id, bank_id
+GROUP BY year, microregion_id, bank_id
 ```
 
 ```{sql connection=data_lake, output.var="itau.id"}
@@ -136,24 +140,24 @@ LIM.data <- bank.data %>%
   mutate(bank_id = as.double(bank_id),
          bank_id = case_when(bank_id %in% itau_unibanco ~ 60872504,
                              TRUE ~ bank_id)) %>%
-  group_by(year, mca_id, bank_id) %>%
+  group_by(year, microregion_id, bank_id) %>%
   summarise_all(sum) %>%
   ungroup() %>% 
-  group_by(year, mca_id) %>% 
-  mutate(mca_loans=sum(total_loans),
-         mca_other_loans=sum(other_loans),
-         mca_deposits=sum(deposits),
-         mca_banks=n_distinct(bank_id),
-         mca_branches=sum(n_branches)) %>%
+  group_by(year, microregion_id) %>% 
+  mutate(microregion_loans=sum(total_loans),
+         microregion_other_loans=sum(other_loans),
+         microregion_deposits=sum(deposits),
+         microregion_banks=n_distinct(bank_id),
+         microregion_branches=sum(n_branches)) %>%
   ungroup() %>% 
-  mutate(s_loans=total_loans/mca_loans,
-         s_other_loans=other_loans/mca_other_loans,
-         s_deposits=deposits/mca_deposits) %>%
-  group_by(mca_id, .drop=TRUE) %>% 
-  summarise(n_banks = first(mca_banks),
-            total_loans = first(mca_loans),
-            other_loans = first(mca_other_loans),
-            deposits = first(mca_deposits),
+  mutate(s_loans=total_loans/microregion_loans,
+         s_other_loans=other_loans/microregion_other_loans,
+         s_deposits=deposits/microregion_deposits) %>%
+  group_by(microregion_id, .drop=TRUE) %>% 
+  summarise(n_banks = first(microregion_banks),
+            total_loans = first(microregion_loans),
+            other_loans = first(microregion_other_loans),
+            deposits = first(microregion_deposits),
             ihh_loans = sum(s_loans^2),
             ihh_other_loans = sum(s_other_loans^2),
             ihh_deposits = sum(s_deposits^2),
@@ -163,13 +167,13 @@ LIM.data <- bank.data %>%
                                          TRUE ~ (ihh_other_loans-1/n_banks)/(1-1/n_banks)),
             ihhN_deposits = case_when(n_banks==1 ~ 1,
                                       TRUE ~ (ihh_deposits-1/n_banks)/(1-1/n_banks))) %>% 
-  select(mca_id, ihh_loans, ihh_other_loans, ihh_deposits, ihhN_loans, ihhN_other_loans, ihhN_deposits) %>% 
-  rename(LIM_loans = ihh_loans,
-         LIM_other_loans = ihh_other_loans,
-         LIM_deposits = ihh_deposits,
-         LIMn_loans = ihhN_loans,
-         LIMn_other_loans = ihhN_other_loans,
-         LIMn_deposits = ihhN_deposits) %>% 
+  select(microregion_id, ihh_loans, ihh_other_loans, ihh_deposits, ihhN_loans, ihhN_other_loans, ihhN_deposits) %>% 
+  rename(ihh_merge_loans = ihh_loans,
+         ihh_merge_other_loans = ihh_other_loans,
+         ihh_merge_deposits = ihh_deposits,
+         ihhN_merge_loans = ihhN_loans,
+         ihhN_merge_other_loans = ihhN_other_loans,
+         ihhN_merge_deposits = ihhN_deposits) %>% 
   as.data.frame()
   
 bank.data  %<>%
@@ -180,31 +184,31 @@ bank.data  %<>%
                              year<=2008 & bank_id %in% unibanco ~ 33700394,
                              year>2008 & bank_id %in% itau_unibanco ~ 60872504,
                              TRUE ~ bank_id)) %>% 
-  group_by(year, mca_id, bank_id) %>%
+  group_by(year, microregion_id, bank_id) %>%
   summarise_all(sum) %>%
   ungroup() %>% 
-  group_by(year, mca_id) %>% 
-  mutate(mca_loans=sum(total_loans),
-         mca_other_loans=sum(other_loans),
-         mca_deposits=sum(deposits),
-         mca_banks=n_distinct(bank_id),
-         mca_branches=sum(n_branches)) %>%
+  group_by(year, microregion_id) %>% 
+  mutate(microregion_loans=sum(total_loans),
+         microregion_other_loans=sum(other_loans),
+         microregion_deposits=sum(deposits),
+         microregion_banks=n_distinct(bank_id),
+         microregion_branches=sum(n_branches)) %>%
   ungroup() %>% 
-  mutate(s_loans=total_loans/mca_loans,
-         s_other_loans=other_loans/mca_other_loans,
-         s_deposits=deposits/mca_deposits) %>%
-  group_by(mca_id) %>%
+  mutate(s_loans=total_loans/microregion_loans,
+         s_other_loans=other_loans/microregion_other_loans,
+         s_deposits=deposits/microregion_deposits) %>%
+  group_by(microregion_id) %>%
   mutate(itau = sum(bank_id[year==2008] %in% 60872504),
          unibanco = sum(bank_id[year==2008] %in% 33700394),
          treated = itau * unibanco,
          partial.control = as.numeric(itau + unibanco == 1)) %>%
   ungroup() %>% 
-  group_by(year, mca_id, .drop=TRUE) %>% 
-  summarise(n_banks = first(mca_banks),
-            n_branches = first(mca_branches),
-            total_loans = first(mca_loans),
-            other_loans = first(mca_other_loans),
-            deposits = first(mca_deposits),
+  group_by(year, microregion_id, .drop=TRUE) %>% 
+  summarise(n_banks = first(microregion_banks),
+            n_branches = first(microregion_branches),
+            total_loans = first(microregion_loans),
+            other_loans = first(microregion_other_loans),
+            deposits = first(microregion_deposits),
             ihh_loans = sum(s_loans^2),
             ihh_other_loans = sum(s_other_loans^2),
             ihh_deposits = sum(s_deposits^2),
@@ -219,30 +223,58 @@ bank.data  %<>%
             treated = first(treated),
             partial.control = first(partial.control)) %>% 
   as.data.frame()
-
-save(bank.data, file="../02 - Data sets/bank_data.Rdata")
-
-lim.data <- bank.data %>% 
-  filter(year==2018)
-
 ```
 
 # Consolidating a regression data set
 
 ```{r, eval=TRUE}
 working.data <- emp.data %>% 
-  left_join(bank.data, by=c("mca_id", "year")) %>% 
+  left_join(bank.data, by=c("microregion_id", "year")) %>% 
   left_join(trade.data, by=c("sector_id", "year")) %>%
-  left_join(LIM.data, by="mca_id") %>% 
+  left_join(LIM.data, by="microregion_id") %>% 
   mutate_at(vars(!starts_with(c("ihh", "LIM"))), ~ replace_na(., 0))
 
-save(working.data, file="../02 - Data sets/working_data.Rdata")
+# correcting for inflation in the period (all nominal values will be adjusted for 2000=1)
+## wages are in BRL and will be corrected considering IPCA
+# # Source: http://ipeadata.gov.br/beta3/#/dados-serie?anomapa=&ascOrder=&base=macro&busca=ipca&columnOrdering=&end=2020&fonte=&serid=PRECOS_IPCAG&skip=0&start=1980&tema=&territoriality=
+ipca <- read_csv("../02 - Data sets/PRECOS_IPCAG.csv") %>%
+  rename(year=ANO,
+         ipca=VALVALOR) %>%
+  filter(year %in% 1995:2018) %>%
+  mutate(ipca.shift=ifelse(year==1994, 1, 1+ipca/100),
+         ipca.index=ifelse(year==1994, 1, 1*cumprod(ipca.shift)),
+         ipca = ipca.index / ipca.index[year==2000]) %>% 
+  select(year, ipca)
+
+## international products are in US$ and will be corrected considering 
+cpi <- read_tsv(file="https://download.bls.gov/pub/time.series/cu/cu.data.1.AllItems") %>% 
+  filter(series_id=="CUSR0000SA0",
+         year %in% 1995:2018) %>% 
+  group_by(year) %>% 
+  summarise(index = mean(value)) %>% 
+  mutate(cpi = index / index[year==2000]) %>% 
+  select(year, cpi)
+
+prices <- left_join(ipca, cpi, by="year")
+
+deflate <- function(x, index){
+  deflated <- x/index
+  deflated
+}
+
+working.data %<>%
+  left_join(prices, by="year") %>% 
+  mutate(across(starts_with("imports"), ~deflate(., index=cpi)),
+         across(ends_with("wage"), ~deflate(., index=ipca)),
+         uf = substr(microregion_id, 1, 2))
+
+save(working.data, file="../02 - Data sets/working_data_microregion_manufacturing.Rdata")
 ```
 
 # Overview for data set
 
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-load("../02 - Data sets/working_data.Rdata")
+load("../02 - Data sets/working_data_microregion.Rdata")
 head(working.data)
 ```
 
